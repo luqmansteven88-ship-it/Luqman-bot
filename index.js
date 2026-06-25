@@ -1,4 +1,4 @@
-index.js
+// index.js
 const { default: makeWASocket, useMultiFileAuthState, Browsers } = require("@whiskeysockets/baileys")
 const qrcode = require("qrcode-terminal")
 const { exec } = require("child_process")
