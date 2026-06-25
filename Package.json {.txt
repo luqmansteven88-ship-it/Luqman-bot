@@ -1,4 +1,4 @@
-Package.json
+package.json
 {
   "name": "luqman-x-md",
   "version": "1.0.0",
