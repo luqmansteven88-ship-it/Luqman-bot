@@ -5,7 +5,7 @@ const { exec } = require("child_process")
 const BOT_NAME = "LUQMAN X MD"
 const FOOTER = "acha mzaha na maisha"
 let PREFIX = "." 
-const ADMIN_NUMBERS = ["255712345678@s.whatsapp.net"] // Weka namba za wasaidizi hapa ukipenda
+const ADMIN_NUMBERS = ["255678716839@s.whatsapp.net"] // Weka namba za wasaidizi hapa ukipenda
 const maonyo = {}
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState("session")
