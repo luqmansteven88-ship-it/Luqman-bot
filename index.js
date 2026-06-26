@@ -28,26 +28,32 @@ async function startBot() {
 
   sock.ev.on("creds.update", saveCreds);
 
-  // Pairing Code System
+  // Pairing code generation
   if (!state.creds.registered) {
     setTimeout(async () => {
       try {
         const code = await sock.requestPairingCode(OWNER_NUMBER);
-        console.log(`\n🔑 PAIRING CODE: ${code}\n`);
+
+        console.log("=================================");
+        console.log("🔑 YOUR PAIRING CODE:");
+        console.log(code);
+        console.log("📱 Open WhatsApp > Linked Devices");
+        console.log("➡ Link with phone number");
+        console.log("=================================");
       } catch (err) {
-        console.log("Pairing error:", err.message);
+        console.log("Pairing Error:", err.message);
       }
-    }, 3000);
+    }, 5000);
   }
 
   sock.ev.on("connection.update", ({ connection, lastDisconnect }) => {
     if (connection === "open") {
-      console.log(`${BOT_NAME} connected successfully`);
+      console.log(`✅ ${BOT_NAME} connected successfully`);
     }
 
     if (connection === "close") {
       const reason = lastDisconnect?.error?.output?.statusCode;
-      console.log("Connection closed:", reason);
+      console.log("❌ Connection closed:", reason);
 
       if (reason !== DisconnectReason.loggedOut) {
         startBot();
@@ -66,108 +72,26 @@ async function startBot() {
     let body =
       msg.message.conversation ||
       msg.message.extendedTextMessage?.text ||
-      msg.message.imageMessage?.caption ||
-      msg.message.videoMessage?.caption ||
       "";
 
     if (MODE === "private" && !isOwner) return;
     if (!body.startsWith(PREFIX)) return;
 
-    const args = body.slice(PREFIX.length).trim().split(/ +/);
-    const command = args.shift().toLowerCase();
+    const command = body.slice(1).trim().split(/ +/)[0].toLowerCase();
 
-    // Auto presence
     await sock.sendPresenceUpdate("recording", from);
     await sock.sendPresenceUpdate("composing", from);
 
-    // MENU
-    if (command === "menu") {
-      const date = new Date().toLocaleDateString();
-      const time = new Date().toLocaleTimeString();
-
-      let menu = `
-╭━━━〔 *LUQMAN MD MENU* 〕━━━⬣
-
-┋ 🤖 Bot: ${BOT_NAME}
-┋ 👑 Owner: ${OWNER_NAME}
-┋ ⚙️ Mode: ${MODE.toUpperCase()}
-┋ 📅 Date: ${date}
-┋ 🕐 Time: ${time}
-
-╭━━〔 *GENERAL* 〕━━⬣
-┋ ⭐ .alive
-┋ ⭐ .menu
-┋ ⭐ .ping
-┋ ⭐ .owner
-
-╭━━〔 *TOOLS* 〕━━⬣
-┋ ⭐ .getpp
-┋ ⭐ .vv
-
-╭━━〔 *GROUP* 〕━━⬣
-┋ ⭐ .open
-┋ ⭐ .close
-┋ ⭐ .kick
-┋ ⭐ .warn
-┋ ⭐ .antilink on/off
-┋ ⭐ .antisticker on/off
-┋ ⭐ .antimedia on/off
-
-╭━━〔 *OWNER* 〕━━⬣
-┋ ⭐ .setprefix
-┋ ⭐ .mode public/private
-┋ ⭐ .restart
-
-╰━━━〔 *Acha mzaha na maisha* 〕━━⬣
-`;
-      await sock.sendMessage(from, { text: menu });
-    }
-
-    // ALIVE
-    if (command === "alive") {
-      await sock.sendMessage(from, {
-        text: "🤖 LUQMAN MD is online 🔥"
-      });
-    }
-
-    // PING
     if (command === "ping") {
       await sock.sendMessage(from, {
         text: "⚡ Pong!"
       });
     }
 
-    // OWNER
-    if (command === "owner") {
+    if (command === "menu") {
       await sock.sendMessage(from, {
-        text: `👑 Owner: ${OWNER_NAME}\n📞 ${OWNER_NUMBER}`
+        text: `🤖 ${BOT_NAME}\n👑 Owner: ${OWNER_NAME}\n⚙ Mode: ${MODE}`
       });
-    }
-
-    // MODE (owner only)
-    if (command === "mode" && isOwner) {
-      if (args[0] === "public" || args[0] === "private") {
-        MODE = args[0];
-        await sock.sendMessage(from, {
-          text: `⚙️ Mode changed to ${MODE}`
-        });
-      }
-    }
-
-    // PREFIX (owner only)
-    if (command === "setprefix" && isOwner) {
-      PREFIX = args[0];
-      await sock.sendMessage(from, {
-        text: `🔣 Prefix changed to ${PREFIX}`
-      });
-    }
-
-    // RESTART (owner only)
-    if (command === "restart" && isOwner) {
-      await sock.sendMessage(from, {
-        text: "🔄 Restarting..."
-      });
-      process.exit(0);
     }
   });
 }
