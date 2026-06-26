@@ -28,28 +28,30 @@ async function startBot() {
 
   sock.ev.on("creds.update", saveCreds);
 
-  // PAIRING CODE FIXED
-  if (!state.creds.registered) {
-    try {
-      const phoneNumber = OWNER_NUMBER.replace(/[^0-9]/g, "");
+  // FIXED PAIRING SYSTEM
+  sock.ev.on("connection.update", async ({ connection, lastDisconnect }) => {
 
-      const code = await sock.requestPairingCode(phoneNumber);
+    // Generate code only when connecting
+    if (connection === "connecting" && !sock.authState.creds.registered) {
+      try {
+        const code = await sock.requestPairingCode(OWNER_NUMBER);
 
-      console.log("=================================");
-      console.log("🔑 PAIRING CODE:");
-      console.log(code);
-      console.log("Paste this code in WhatsApp > Linked Devices > Link with phone number");
-      console.log("=================================");
-    } catch (err) {
-      console.log("Pairing Error:", err);
+        console.log("=================================");
+        console.log("🔑 YOUR PAIRING CODE:");
+        console.log(code);
+        console.log("Paste on WhatsApp > Linked Devices > Link with phone number");
+        console.log("=================================");
+      } catch (err) {
+        console.log("PAIR ERROR:", err.message);
+      }
     }
-  }
 
-  sock.ev.on("connection.update", ({ connection, lastDisconnect }) => {
+    // Connected
     if (connection === "open") {
       console.log(`✅ ${BOT_NAME} connected successfully`);
     }
 
+    // Reconnect if disconnected
     if (connection === "close") {
       const reason = lastDisconnect?.error?.output?.statusCode;
       console.log("❌ Connection closed:", reason);
@@ -81,7 +83,7 @@ async function startBot() {
     const args = body.slice(PREFIX.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();
 
-    // AUTO PRESENCE
+    // AUTO RECORD + TYPING
     await sock.sendPresenceUpdate("recording", from);
     await sock.sendPresenceUpdate("composing", from);
 
@@ -149,32 +151,29 @@ async function startBot() {
       });
     }
 
-    // MODE (OWNER ONLY)
+    // MODE
     if (command === "mode" && isOwner) {
       if (args[0] === "public" || args[0] === "private") {
         MODE = args[0];
-
         await sock.sendMessage(from, {
           text: `⚙️ Mode changed to ${MODE}`
         });
       }
     }
 
-    // PREFIX (OWNER ONLY)
+    // PREFIX
     if (command === "setprefix" && isOwner) {
       PREFIX = args[0];
-
       await sock.sendMessage(from, {
         text: `🔣 Prefix changed to ${PREFIX}`
       });
     }
 
-    // RESTART (OWNER ONLY)
+    // RESTART
     if (command === "restart" && isOwner) {
       await sock.sendMessage(from, {
         text: "🔄 Restarting bot..."
       });
-
       process.exit(0);
     }
   });
