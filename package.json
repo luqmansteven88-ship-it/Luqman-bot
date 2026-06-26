@@ -1,13 +1,12 @@
 {
-  "name": "luqman-bot",
+  "name": "luqman-md",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.5.0",
-    "express": "^4.19.2",
-    "pino": "^9.1.0"
+    "@whiskeysockets/baileys": "*",
+    "pino": "*"
   }
 }
