@@ -6,6 +6,7 @@ const {
 } = require("@whiskeysockets/baileys");
 
 const pino = require("pino");
+const express = require("express"); // Nimeongeza hii kwa ajili ya Render port binding
 
 const BOT_NAME = "LUQMAN MD";
 const OWNER_NAME = "LUQMAN SJ";
@@ -23,38 +24,34 @@ async function startBot() {
     auth: state,
     logger: pino({ level: "silent" }),
     printQRInTerminal: false,
-    browser: ["LUQMAN MD", "Chrome", "1.0"]
+    // MAREKEBISHO YA BROWSER: Muundo wa kweli unaokubaliwa na WhatsApp bila block
+    browser: ["Mac OS", "Chrome", "10.15.7"]
   });
 
   sock.ev.on("creds.update", saveCreds);
 
-  // FIXED PAIRING SYSTEM
-  sock.ev.on("connection.update", async ({ connection, lastDisconnect }) => {
-
-    // Generate code only when connecting
-    if (connection === "connecting" && !sock.authState.creds.registered) {
+  // Pairing Code System
+  if (!state.creds.registered) {
+    setTimeout(async () => {
       try {
         const code = await sock.requestPairingCode(OWNER_NUMBER);
-
-        console.log("=================================");
-        console.log("🔑 YOUR PAIRING CODE:");
-        console.log(code);
-        console.log("Paste on WhatsApp > Linked Devices > Link with phone number");
-        console.log("=================================");
+        console.log(`\n========================================\n`);
+        console.log(`🔑 YOUR PAIRING CODE: ${code}`);
+        console.log(`\n========================================\n`);
       } catch (err) {
-        console.log("PAIR ERROR:", err.message);
+        console.log("Pairing error:", err.message);
       }
-    }
+    }, 3000);
+  }
 
-    // Connected
+  sock.ev.on("connection.update", ({ connection, lastDisconnect }) => {
     if (connection === "open") {
-      console.log(`✅ ${BOT_NAME} connected successfully`);
+      console.log(`${BOT_NAME} connected successfully`);
     }
 
-    // Reconnect if disconnected
     if (connection === "close") {
       const reason = lastDisconnect?.error?.output?.statusCode;
-      console.log("❌ Connection closed:", reason);
+      console.log("Connection closed:", reason);
 
       if (reason !== DisconnectReason.loggedOut) {
         startBot();
@@ -83,7 +80,7 @@ async function startBot() {
     const args = body.slice(PREFIX.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();
 
-    // AUTO RECORD + TYPING
+    // Auto presence
     await sock.sendPresenceUpdate("recording", from);
     await sock.sendPresenceUpdate("composing", from);
 
@@ -151,7 +148,7 @@ async function startBot() {
       });
     }
 
-    // MODE
+    // MODE (owner only)
     if (command === "mode" && isOwner) {
       if (args[0] === "public" || args[0] === "private") {
         MODE = args[0];
@@ -161,7 +158,7 @@ async function startBot() {
       }
     }
 
-    // PREFIX
+    // PREFIX (owner only)
     if (command === "setprefix" && isOwner) {
       PREFIX = args[0];
       await sock.sendMessage(from, {
@@ -169,14 +166,21 @@ async function startBot() {
       });
     }
 
-    // RESTART
+    // RESTART (owner only)
     if (command === "restart" && isOwner) {
       await sock.sendMessage(from, {
-        text: "🔄 Restarting bot..."
+        text: "🔄 Restarting..."
       });
       process.exit(0);
     }
   });
+
+  // Hapa chini nimeongeza Server ya Express ili boti isife ikiwa Render (Port Binding)
+  const app = express();
+  const PORT = process.env.PORT || 10000;
+  app.get("/", (req, res) => res.send("LUQMAN MD Web Server Active"));
+  app.listen(PORT, () => console.log(`Server connected on port ${PORT}`));
 }
 
 startBot();
+      
