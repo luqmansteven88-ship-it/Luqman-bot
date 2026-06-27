@@ -13,8 +13,8 @@ const BOT_NAME = "꧁𒆜𝑺𝑻𝑨𝑹 𝑿 𝑺𝑱𒆜꧂🪀";
 const OWNER_NAME = "𝙇𝙐𝙌𝙈𝘼𝙉 𝙎𝙅";
 const OWNER_NUMBER = "255678716839";
 
-let PREFIX = ".";
-let MODE = "public";
+let PREFIX = "+";
+let MODE = "private";
 
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState("./session");
@@ -35,6 +35,20 @@ async function startBot() {
 
     if (connection === "connecting") {
       console.log("🔄 Inaunganisha...");
+
+      if (!sock.authState.creds.registered) {
+        await delay(3000);
+        try {
+          const code = await sock.requestPairingCode(OWNER_NUMBER);
+          console.log(`\n🔑 PAIRING CODE YAKO: ${code}\n`);
+        } catch (err) {
+          console.log("❌ Pairing failed:", err.message);
+        }
+      }
+    }
+
+    if (connection === "open") {
+      console.log(`✅ ${BOT_NAME} imeunganishwa kikamilifu!`);
     }
 
     if (connection === "close") {
@@ -48,23 +62,7 @@ async function startBot() {
         console.log("🚪 Session ime logout. Futa session u-pair upya.");
       }
     }
-
-    if (connection === "open") {
-      console.log(`✅ ${BOT_NAME} imeunganishwa kikamilifu!`);
-    }
   });
-
-  // PAIRING CODE FIX
-  if (!sock.authState.creds.registered) {
-    await delay(10000);
-
-    try {
-      const code = await sock.requestPairingCode(OWNER_NUMBER);
-      console.log(`\n🔑 PAIRING CODE YAKO: ${code}\n`);
-    } catch (err) {
-      console.log("❌ Pairing failed:", err.message);
-    }
-  }
 
   sock.ev.on("messages.upsert", async ({ messages }) => {
     const msg = messages[0];
@@ -96,7 +94,7 @@ async function startBot() {
 
       let menu = `
 ╭━━━━━━━〔 *ＬＵＱＭＡＮ • ＭＤ* 〕━━━━━━━⬣
-┃ 🌟 Ｗｅｌｃｏｍｅ ｔｏ ｔｈｅ Ｂｏｔ 🌟
+┃ ☠️🔪 Ｗｅｌｃｏｍｅ ｔｏ ｔｈｅ Ｂｏｔ ☠️🔪
 ┃
 ┃ 👤 *User:* @Kiongozi
 ┃ 🤖 *Bot:* ${BOT_NAME}
@@ -165,7 +163,7 @@ async function startBot() {
 ┣ 🪀 .calculate
 ╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━⬣
 
-╭━━━〔 *👑 OWNER MENU* 〕━━━⬣
+╭━━━〔 *👑 🤘OWNER MENU* 〕━━━⬣
 ┣ 🪀 .alive
 ┣ 🪀 .ping
 ┣ 🪀 .owner
