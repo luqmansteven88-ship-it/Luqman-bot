@@ -6,6 +6,7 @@ const {
 } = require("@whiskeysockets/baileys");
 
 const pino = require("pino");
+const express = require("express"); // Nimeongeza hii kwa ajili ya Render port binding
 
 const BOT_NAME = "LUQMAN MD";
 const OWNER_NAME = "LUQMAN SJ";
@@ -169,6 +170,12 @@ async function startBot() {
       process.exit(0);
     }
   });
+
+  // SEVA YA EXPRESS KUZUIA Boti KUZIMWA NA RENDER (Port Binding)
+  const app = express();
+  const PORT = process.env.PORT || 10000;
+  app.get("/", (req, res) => res.send(`${BOT_NAME} Web Server is Active!`));
+  app.listen(PORT, () => console.log(`Server connected on port ${PORT} to keep bot alive.`));
 }
 
 startBot();
