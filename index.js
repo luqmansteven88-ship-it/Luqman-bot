@@ -25,33 +25,44 @@ async function startBot() {
     auth: state,
     logger: pino({ level: "silent" }),
     printQRInTerminal: false,
-    browser: ["Ubuntu", "Chrome", "120.0.0.0"]
+    browser: ["STAR-X", "Chrome", "1.0.0"]
   });
 
   sock.ev.on("creds.update", saveCreds);
 
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect } = update;
-    
+
+    if (connection === "connecting") {
+      console.log("🔄 Inaunganisha...");
+    }
+
     if (connection === "close") {
       const reason = lastDisconnect?.error?.output?.statusCode;
       console.log("❌ Connection closed:", reason);
-      
+
       if (reason !== DisconnectReason.loggedOut) {
+        console.log("♻️ Inajaribu ku reconnect...");
         startBot();
+      } else {
+        console.log("🚪 Session ime logout. Futa session u-pair upya.");
       }
-    } else if (connection === "open") {
-      console.log(`✅ ${BOT_NAME} imeunganishwa kwa mafanikio! Ipo Live!`);
+    }
+
+    if (connection === "open") {
+      console.log(`✅ ${BOT_NAME} imeunganishwa kikamilifu!`);
     }
   });
 
-  if (!state.creds.registered) {
-    await delay(5000);
+  // PAIRING CODE FIX
+  if (!sock.authState.creds.registered) {
+    await delay(10000);
+
     try {
       const code = await sock.requestPairingCode(OWNER_NUMBER);
       console.log(`\n🔑 PAIRING CODE YAKO: ${code}\n`);
     } catch (err) {
-      console.log("PAIR ERROR:", err.message);
+      console.log("❌ Pairing failed:", err.message);
     }
   }
 
@@ -76,7 +87,6 @@ async function startBot() {
     const args = body.slice(PREFIX.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();
 
-    // AUTO RECORD + TYPING
     await sock.sendPresenceUpdate("recording", from);
     await sock.sendPresenceUpdate("composing", from);
 
@@ -111,8 +121,8 @@ async function startBot() {
 ╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━━〔 *🛠️ GROUP COMMANDS* 〕━━━⬣
-┣ 🪀 .tagall (Tag everyone)
-┣ 🪀 .hidetag (Hidden tag)
+┣ 🪀 .tagall
+┣ 🪀 .hidetag
 ┣ 🪀 .kick @user
 ┣ 🪀 .add +number
 ┣ 🪀 .promote @user
@@ -126,70 +136,82 @@ async function startBot() {
 ╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━━〔 *🎨 STICKER & MAKER* 〕━━━⬣
-┣ 🪀 .sticker (Reply to image/video)
-┣ 🪀 .qc (Quote maker)
-┣ 🪀 .take (Steal sticker)
-┣ 🪀 .toimg (Sticker to image)
-┣ 🪀 .tomp4 (Sticker to video)
-┣ 🪀 .logo [text1] [text2]
-┣ 🪀 .neon [text]
-┣ 🪀 .glitch [text]
+┣ 🪀 .sticker
+┣ 🪀 .qc
+┣ 🪀 .take
+┣ 🪀 .toimg
+┣ 🪀 .tomp4
+┣ 🪀 .logo
+┣ 🪀 .neon
+┣ 🪀 .glitch
 ╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━━〔 *🔍 SEARCH & STALK* 〕━━━⬣
-┣ 🪀 .google [query]
-┣ 🪀 .yts [query]
-┣ 🪀 .pinterest [query]
-┣ 🪀 .igstalk [username]
-┣ 🪀 .tiktokstalk [username]
-┣ 🪀 .githubstalk [username]
-┣ 🪀 .weather [city]
+┣ 🪀 .google
+┣ 🪀 .yts
+┣ 🪀 .pinterest
+┣ 🪀 .igstalk
+┣ 🪀 .tiktokstalk
+┣ 🪀 .githubstalk
+┣ 🪀 .weather
 ╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━━〔 *🤖 AI & TOOLS* 〕━━━⬣
-┣ 🪀 .ai [ask anything]
-┣ 🪀 .chatgpt [query]
-┣ 🪀 .dalle [generate image]
-┣ 🪀 .translate [lang] [text]
-┣ 🪀 .tts [lang] [text]
-┣ 🪀 .calculate [math]
+┣ 🪀 .ai
+┣ 🪀 .chatgpt
+┣ 🪀 .dalle
+┣ 🪀 .translate
+┣ 🪀 .tts
+┣ 🪀 .calculate
 ╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━━〔 *👑 OWNER MENU* 〕━━━⬣
-┣ 🪀 .alive (Check bot status)
-┣ 🪀 .ping (Speed test)
-┣ 🪀 .owner (Owner details)
-┣ 🪀 .broadcast [text]
-┣ 🪀 .setprefix [symbol]
+┣ 🪀 .alive
+┣ 🪀 .ping
+┣ 🪀 .owner
+┣ 🪀 .broadcast
+┣ 🪀 .setprefix
 ┣ 🪀 .mode public/private
-┣ 🪀 .restart (Reboot bot)
-┣ 🪀 .ban @user
-┣ 🪀 .unban @user
+┣ 🪀 .restart
+┣ 🪀 .ban
+┣ 🪀 .unban
 ╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━⬣
 
 > *Acha mzaha na maisha. LUQMAN SJ ndo mwamba!* 🔥
 `;
+
       await sock.sendMessage(from, { text: menu });
     }
 
     if (command === "alive") {
-      await sock.sendMessage(from, { text: "🤖 *LUQMAN MD* is fully active and running perfectly on Render Cloud! 🔥" });
+      await sock.sendMessage(from, {
+        text: "🤖 *LUQMAN MD* is fully active and running on Render Cloud 🔥"
+      });
     }
 
     if (command === "ping") {
-      await sock.sendMessage(from, { text: "⚡ *Pong!* \nSpeed: 0.0023 ms (Ultra Fast)" });
+      await sock.sendMessage(from, {
+        text: "⚡ *Pong!* Speed: Ultra Fast"
+      });
     }
 
     if (command === "owner") {
-      await sock.sendMessage(from, { text: `👑 *Bot Owner:* ${OWNER_NAME}\n📞 *Contact:* ${OWNER_NUMBER}\n🌐 *Location:* Mwanza, Tanzania` });
+      await sock.sendMessage(from, {
+        text: `👑 *Owner:* ${OWNER_NAME}\n📞 *Number:* ${OWNER_NUMBER}\n🌍 *Location:* Mwanza, Tanzania`
+      });
     }
   });
 
   const app = express();
   const PORT = process.env.PORT || 10000;
-  app.get("/", (req, res) => res.send(`${BOT_NAME} Web Server is Active!`));
-  app.listen(PORT, () => console.log(`Server connected on port ${PORT} to keep bot alive.`));
+
+  app.get("/", (req, res) => {
+    res.send(`${BOT_NAME} Web Server is Active!`);
+  });
+
+  app.listen(PORT, () => {
+    console.log(`🌐 Server running on port ${PORT}`);
+  });
 }
 
 startBot();
-    
