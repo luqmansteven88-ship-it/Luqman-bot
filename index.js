@@ -11,7 +11,7 @@ const express = require("express");
 
 const BOT_NAME = "LUQMAN MD 🪀";
 const OWNER_NAME = "LUQMAN SJ 👑";
-const OWNER_NUMBER = "255638905914";
+const OWNER_NUMBER = "255678716839";
 
 let PREFIX = ".";
 let MODE = "public";
