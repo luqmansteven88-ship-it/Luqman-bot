@@ -6,7 +6,6 @@ const {
 } = require("@whiskeysockets/baileys");
 
 const pino = require("pino");
-const express = require("express"); // Nimeongeza hii kwa ajili ya Render port binding
 
 const BOT_NAME = "LUQMAN MD";
 const OWNER_NAME = "LUQMAN SJ";
@@ -24,34 +23,37 @@ async function startBot() {
     auth: state,
     logger: pino({ level: "silent" }),
     printQRInTerminal: false,
-    // MAREKEBISHO YA BROWSER: Muundo wa kweli unaokubaliwa na WhatsApp bila block
-    browser: ["Mac OS", "Chrome", "10.15.7"]
+
+    // MAC OS BROWSER FINGERPRINT
+    browser: ["Mac OS", "Safari", "17.0"]
   });
 
   sock.ev.on("creds.update", saveCreds);
 
-  // Pairing Code System
-  if (!state.creds.registered) {
-    setTimeout(async () => {
+  // FIXED PAIRING SYSTEM
+  sock.ev.on("connection.update", async ({ connection, lastDisconnect }) => {
+
+    if (connection === "connecting" && !sock.authState.creds.registered) {
       try {
         const code = await sock.requestPairingCode(OWNER_NUMBER);
-        console.log(`\n========================================\n`);
-        console.log(`🔑 YOUR PAIRING CODE: ${code}`);
-        console.log(`\n========================================\n`);
-      } catch (err) {
-        console.log("Pairing error:", err.message);
-      }
-    }, 3000);
-  }
 
-  sock.ev.on("connection.update", ({ connection, lastDisconnect }) => {
+        console.log("=================================");
+        console.log("🔑 YOUR PAIRING CODE:");
+        console.log(code);
+        console.log("Paste on WhatsApp > Linked Devices > Link with phone number");
+        console.log("=================================");
+      } catch (err) {
+        console.log("PAIR ERROR:", err.message);
+      }
+    }
+
     if (connection === "open") {
-      console.log(`${BOT_NAME} connected successfully`);
+      console.log(`✅ ${BOT_NAME} connected successfully`);
     }
 
     if (connection === "close") {
       const reason = lastDisconnect?.error?.output?.statusCode;
-      console.log("Connection closed:", reason);
+      console.log("❌ Connection closed:", reason);
 
       if (reason !== DisconnectReason.loggedOut) {
         startBot();
@@ -80,11 +82,10 @@ async function startBot() {
     const args = body.slice(PREFIX.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();
 
-    // Auto presence
+    // AUTO RECORD + TYPING
     await sock.sendPresenceUpdate("recording", from);
     await sock.sendPresenceUpdate("composing", from);
 
-    // MENU
     if (command === "menu") {
       const date = new Date().toLocaleDateString();
       const time = new Date().toLocaleTimeString();
@@ -127,28 +128,24 @@ async function startBot() {
       await sock.sendMessage(from, { text: menu });
     }
 
-    // ALIVE
     if (command === "alive") {
       await sock.sendMessage(from, {
         text: "🤖 LUQMAN MD is online 🔥"
       });
     }
 
-    // PING
     if (command === "ping") {
       await sock.sendMessage(from, {
         text: "⚡ Pong!"
       });
     }
 
-    // OWNER
     if (command === "owner") {
       await sock.sendMessage(from, {
         text: `👑 Owner: ${OWNER_NAME}\n📞 ${OWNER_NUMBER}`
       });
     }
 
-    // MODE (owner only)
     if (command === "mode" && isOwner) {
       if (args[0] === "public" || args[0] === "private") {
         MODE = args[0];
@@ -158,7 +155,6 @@ async function startBot() {
       }
     }
 
-    // PREFIX (owner only)
     if (command === "setprefix" && isOwner) {
       PREFIX = args[0];
       await sock.sendMessage(from, {
@@ -166,21 +162,13 @@ async function startBot() {
       });
     }
 
-    // RESTART (owner only)
     if (command === "restart" && isOwner) {
       await sock.sendMessage(from, {
-        text: "🔄 Restarting..."
+        text: "🔄 Restarting bot..."
       });
       process.exit(0);
     }
   });
-
-  // Hapa chini nimeongeza Server ya Express ili boti isife ikiwa Render (Port Binding)
-  const app = express();
-  const PORT = process.env.PORT || 10000;
-  app.get("/", (req, res) => res.send("LUQMAN MD Web Server Active"));
-  app.listen(PORT, () => console.log(`Server connected on port ${PORT}`));
 }
 
 startBot();
-      
