@@ -6,7 +6,7 @@ const {
 } = require("@whiskeysockets/baileys");
 
 const pino = require("pino");
-const express = require("express"); // Nimeongeza hii kwa ajili ya Render port binding
+const express = require("express");
 
 const BOT_NAME = "LUQMAN MD";
 const OWNER_NAME = "LUQMAN SJ";
@@ -24,30 +24,29 @@ async function startBot() {
     auth: state,
     logger: pino({ level: "silent" }),
     printQRInTerminal: false,
-
-    // MAC OS BROWSER FINGERPRINT
-    browser: ["Mac OS", "Safari", "17.0"]
+    // BROWSER FINGERPRINT IMARA ZAIDI
+    browser: ["Mac OS", "Chrome", "10.15.7"]
   });
 
   sock.ev.on("creds.update", saveCreds);
 
-  // FIXED PAIRING SYSTEM
-  sock.ev.on("connection.update", async ({ connection, lastDisconnect }) => {
-
-    if (connection === "connecting" && !sock.authState.creds.registered) {
+  // MFUMO MPYA WA PAIRING CODE (Nje ya Connection Update kwa uhakika)
+  if (!sock.authState.creds.registered) {
+    setTimeout(async () => {
       try {
         const code = await sock.requestPairingCode(OWNER_NUMBER);
-
-        console.log("=================================");
+        console.log("\n=================================");
         console.log("🔑 YOUR PAIRING CODE:");
         console.log(code);
         console.log("Paste on WhatsApp > Linked Devices > Link with phone number");
-        console.log("=================================");
+        console.log("=================================\n");
       } catch (err) {
         console.log("PAIR ERROR:", err.message);
       }
-    }
+    }, 4000); // Inasubiri sekunde 4 kisha inakupa code kwa nguvu
+  }
 
+  sock.ev.on("connection.update", async ({ connection, lastDisconnect }) => {
     if (connection === "open") {
       console.log(`✅ ${BOT_NAME} connected successfully`);
     }
@@ -171,7 +170,7 @@ async function startBot() {
     }
   });
 
-  // SEVA YA EXPRESS KUZUIA Boti KUZIMWA NA RENDER (Port Binding)
+  // SEVA YA EXPRESS KUZUIA Boti KUZIMWA NA RENDER
   const app = express();
   const PORT = process.env.PORT || 10000;
   app.get("/", (req, res) => res.send(`${BOT_NAME} Web Server is Active!`));
