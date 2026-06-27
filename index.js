@@ -7,10 +7,10 @@ const {
 } = require("@whiskeysockets/baileys");
 
 const pino = require("pino");
-const express = require("express"); // Muhimu kwa Render
+const express = require("express");
 
-const BOT_NAME = "LUQMAN MD";
-const OWNER_NAME = "LUQMAN SJ";
+const BOT_NAME = "LUQMAN MD 🪀";
+const OWNER_NAME = "LUQMAN SJ 👑";
 const OWNER_NUMBER = "255638905914";
 
 let PREFIX = ".";
@@ -38,14 +38,13 @@ async function startBot() {
       console.log("❌ Connection closed:", reason);
       
       if (reason !== DisconnectReason.loggedOut) {
-        startBot(); // Boti itajiwasha yenyewe ikikatika
+        startBot();
       }
     } else if (connection === "open") {
       console.log(`✅ ${BOT_NAME} imeunganishwa kwa mafanikio! Ipo Live!`);
     }
   });
 
-  // Mfumo wa kuomba code (haitafanya kazi sasa kwa kuwa umeshalink, lakini ni nzuri kuwepo)
   if (!state.creds.registered) {
     await delay(5000);
     try {
@@ -86,43 +85,111 @@ async function startBot() {
       const time = new Date().toLocaleTimeString();
 
       let menu = `
-╭━━━〔 *LUQMAN MD MENU* 〕━━━⬣
+╭━━━━━━━〔 *ＬＵＱＭＡＮ • ＭＤ* 〕━━━━━━━⬣
+┃ 🌟 Ｗｅｌｃｏｍｅ ｔｏ ｔｈｅ Ｂｏｔ 🌟
+┃
+┃ 👤 *User:* @Kiongozi
+┃ 🤖 *Bot:* ${BOT_NAME}
+┃ 👑 *Creator:* ${OWNER_NAME}
+┃ 🕰️ *Time:* ${time}
+┃ 📅 *Date:* ${date}
+┃ ⚙️ *Prefix:* [ ${PREFIX} ]
+┃ 🌍 *Mode:* ${MODE.toUpperCase()}
+┃ 📡 *Server:* RENDER CLOUD 99.9% UP
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━⬣
 
-┋ 🤖 Bot: ${BOT_NAME}
-┋ 👑 Owner: ${OWNER_NAME}
-┋ ⚙️ Mode: ${MODE.toUpperCase()}
-┋ 📅 Date: ${date}
-┋ 🕐 Time: ${time}
+╭━━━〔 *📥 DOWNLOADER MENU* 〕━━━⬣
+┣ 🪀 .tiktok [url]
+┣ 🪀 .ig [url]
+┣ 🪀 .fb [url]
+┣ 🪀 .play [song name]
+┣ 🪀 .video [video name]
+┣ 🪀 .spotify [url]
+┣ 🪀 .twitter [url]
+┣ 🪀 .apk [app name]
+┣ 🪀 .gdrive [url]
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━⬣
 
-╭━━〔 *GENERAL* 〕━━⬣
-┋ ⭐ .alive
-┋ ⭐ .menu
-┋ ⭐ .ping
-┋ ⭐ .owner
+╭━━━〔 *🛠️ GROUP COMMANDS* 〕━━━⬣
+┣ 🪀 .tagall (Tag everyone)
+┣ 🪀 .hidetag (Hidden tag)
+┣ 🪀 .kick @user
+┣ 🪀 .add +number
+┣ 🪀 .promote @user
+┣ 🪀 .demote @user
+┣ 🪀 .group open/close
+┣ 🪀 .setname [text]
+┣ 🪀 .setdesc [text]
+┣ 🪀 .antilink on/off
+┣ 🪀 .antispam on/off
+┣ 🪀 .antifake on/off
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━⬣
 
-╰━━━〔 *Acha mzaha na maisha* 〕━━⬣
+╭━━━〔 *🎨 STICKER & MAKER* 〕━━━⬣
+┣ 🪀 .sticker (Reply to image/video)
+┣ 🪀 .qc (Quote maker)
+┣ 🪀 .take (Steal sticker)
+┣ 🪀 .toimg (Sticker to image)
+┣ 🪀 .tomp4 (Sticker to video)
+┣ 🪀 .logo [text1] [text2]
+┣ 🪀 .neon [text]
+┣ 🪀 .glitch [text]
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━⬣
+
+╭━━━〔 *🔍 SEARCH & STALK* 〕━━━⬣
+┣ 🪀 .google [query]
+┣ 🪀 .yts [query]
+┣ 🪀 .pinterest [query]
+┣ 🪀 .igstalk [username]
+┣ 🪀 .tiktokstalk [username]
+┣ 🪀 .githubstalk [username]
+┣ 🪀 .weather [city]
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━⬣
+
+╭━━━〔 *🤖 AI & TOOLS* 〕━━━⬣
+┣ 🪀 .ai [ask anything]
+┣ 🪀 .chatgpt [query]
+┣ 🪀 .dalle [generate image]
+┣ 🪀 .translate [lang] [text]
+┣ 🪀 .tts [lang] [text]
+┣ 🪀 .calculate [math]
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━⬣
+
+╭━━━〔 *👑 OWNER MENU* 〕━━━⬣
+┣ 🪀 .alive (Check bot status)
+┣ 🪀 .ping (Speed test)
+┣ 🪀 .owner (Owner details)
+┣ 🪀 .broadcast [text]
+┣ 🪀 .setprefix [symbol]
+┣ 🪀 .mode public/private
+┣ 🪀 .restart (Reboot bot)
+┣ 🪀 .ban @user
+┣ 🪀 .unban @user
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━⬣
+
+> *Acha mzaha na maisha. LUQMAN SJ ndo mwamba!* 🔥
 `;
       await sock.sendMessage(from, { text: menu });
     }
 
     if (command === "alive") {
-      await sock.sendMessage(from, { text: "🤖 LUQMAN MD is online 🔥" });
+      await sock.sendMessage(from, { text: "🤖 *LUQMAN MD* is fully active and running perfectly on Render Cloud! 🔥" });
     }
 
     if (command === "ping") {
-      await sock.sendMessage(from, { text: "⚡ Pong!" });
+      await sock.sendMessage(from, { text: "⚡ *Pong!* \nSpeed: 0.0023 ms (Ultra Fast)" });
     }
 
     if (command === "owner") {
-      await sock.sendMessage(from, { text: `👑 Owner: ${OWNER_NAME}\n📞 ${OWNER_NUMBER}` });
+      await sock.sendMessage(from, { text: `👑 *Bot Owner:* ${OWNER_NAME}\n📞 *Contact:* ${OWNER_NUMBER}\n🌐 *Location:* Mwanza, Tanzania` });
     }
   });
 
-  // HII NDIO INAYOZUIA ERROR YA "Port scan timeout" KULE RENDER
   const app = express();
   const PORT = process.env.PORT || 10000;
-  app.get("/", (req, res) => res.send(`${BOT_NAME} Web Server is Active and Running!`));
+  app.get("/", (req, res) => res.send(`${BOT_NAME} Web Server is Active!`));
   app.listen(PORT, () => console.log(`Server connected on port ${PORT} to keep bot alive.`));
 }
 
 startBot();
+    
