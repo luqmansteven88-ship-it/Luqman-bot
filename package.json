@@ -1,7 +1,7 @@
 {
   "name": "luqman-md",
-  "version": "1.0.0",
-  "description": "LUQMAN MD WhatsApp Bot",
+  "version": "5.0.0",
+  "description": "LUQMAN MD Heroku Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
