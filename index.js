@@ -5,12 +5,12 @@ const {
   fetchLatestBaileysVersion
 } = require("@whiskeysockets/baileys");
 
+const qrcode = require("qrcode-terminal");
 const pino = require("pino");
 const express = require("express");
-const qrcode = require("qrcode-terminal");
 
-const BOT_NAME = "𓊈𒆜꯭𝆭̽ 𝐋ʋ̽զϻ̈̐𝛂ƞ̄ 𝛅͜𝐉»ً𒆜꧂";
-const OWNER_NAME = "𝙇𝙐𝙌𝙈𝘼𝙉 𝙎𝙅";
+const BOT_NAME = "LUQMAN MD";
+const OWNER_NAME = "LUQMAN SJ";
 const OWNER_NUMBER = "255678716839";
 
 let PREFIX = ".";
@@ -20,8 +20,6 @@ let antilink = {};
 let antisticker = {};
 let mute = {};
 let sudo = [];
-let linkWarnings = {};
-let stickerWarnings = {};
 
 function wm(text) {
   return `_${text}_\n\n_Acha mzaha na maisha_`;
@@ -40,10 +38,13 @@ async function startBot() {
 
   sock.ev.on("creds.update", saveCreds);
 
-  sock.ev.on("connection.update", async ({ connection, lastDisconnect, qr }) => {
+  sock.ev.on("connection.update", async ({ connection, qr, lastDisconnect }) => {
 
     if (qr) {
-      console.log("📷 SCAN THIS QR CODE:");
+      console.clear();
+      console.log("╔════════════════════════════╗");
+      console.log("║ 📲 SCAN QR TO CONNECT BOT ║");
+      console.log("╚════════════════════════════╝");
       qrcode.generate(qr, { small: true });
     }
 
@@ -57,13 +58,11 @@ async function startBot() {
 
     if (connection === "close") {
       const reason = lastDisconnect?.error?.output?.statusCode;
-      console.log(`❌ Connection closed: ${reason}`);
+      console.log("❌ Connection closed:", reason);
 
       if (reason !== DisconnectReason.loggedOut) {
-        console.log("♻️ Reconnecting in 5 seconds...");
-        setTimeout(() => startBot(), 5000);
-      } else {
-        console.log("🚪 Session logged out.");
+        console.log("♻️ Reconnecting...");
+        startBot();
       }
     }
   });
@@ -74,7 +73,6 @@ async function startBot() {
 
     const from = msg.key.remoteJid;
     const sender = msg.key.participant || msg.key.remoteJid;
-    const isGroup = from.endsWith("@g.us");
     const senderNum = sender.split("@")[0];
     const isOwner = sender === `${OWNER_NUMBER}@s.whatsapp.net`;
     const isSudo = sudo.includes(senderNum);
@@ -88,88 +86,107 @@ async function startBot() {
 
     if (mute[from] && !isOwner && !isSudo) return;
     if (MODE === "private" && !isOwner && !isSudo) return;
-
-    // Anti-link
-    if (isGroup && antilink[from] && body.includes("https://")) {
-      const key = `${from}_${sender}`;
-      linkWarnings[key] = (linkWarnings[key] || 0) + 1;
-
-      if (linkWarnings[key] >= 3) {
-        await sock.groupParticipantsUpdate(from, [sender], "remove");
-        delete linkWarnings[key];
-        return await sock.sendMessage(from, {
-          text: wm("☠️ Link warning limit reached. User kicked.")
-        });
-      }
-
-      return await sock.sendMessage(from, {
-        text: wm(`⚠️ Link detected (${linkWarnings[key]}/3)`)
-      });
-    }
-
-    // Anti-sticker
-    if (isGroup && antisticker[from] && msg.message.stickerMessage) {
-      const key = `${from}_${sender}`;
-      stickerWarnings[key] = (stickerWarnings[key] || 0) + 1;
-
-      if (stickerWarnings[key] >= 3) {
-        await sock.groupParticipantsUpdate(from, [sender], "remove");
-        delete stickerWarnings[key];
-        return await sock.sendMessage(from, {
-          text: wm("☠️ Sticker spam reached limit. User kicked.")
-        });
-      }
-
-      return await sock.sendMessage(from, {
-        text: wm(`⚠️ Sticker warning (${stickerWarnings[key]}/3)`)
-      });
-    }
-
     if (!body.startsWith(PREFIX)) return;
 
     const args = body.slice(PREFIX.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();
 
     switch (command) {
+
       case "menu":
         await sock.sendMessage(from, {
-          text: wm(`
-╭┈┈┄⊰ LUQMAN MD MENU ⊱┄┄┄◈
+          text: `
+╔══════════════════════════════╗
+║       🤖 *LUQMAN MD* 🤖
+╠══════════════════════════════╣
+║ 👑 Owner : ${OWNER_NAME}
+║ ⚙ Prefix : ${PREFIX}
+║ 🌍 Mode   : ${MODE}
+║ 🔥 Bot    : ${BOT_NAME}
+╚══════════════════════════════╝
 
-┋ 🤖 Bot: ${BOT_NAME}
-┋ 👑 Owner: ${OWNER_NAME}
-┋ 🎛️ Mode: ${MODE.toUpperCase()}
-┋ 💬 Prefix: ${PREFIX}
+╔════════ *⭐ GENERAL* ════════╗
+║ ➤ .menu 📜
+║ ➤ .alive 🤖
+║ ➤ .ping ⚡
+║ ➤ .owner 👑
+║ ➤ .uptime ⏰
+║ ➤ .repo 💻
+║ ➤ .runtime 🛠
+╚══════════════════════════════╝
 
-┋ 🔰 GENERAL
-┋ ⭐ .alive
-┋ ⭐ .ping
-┋ ⭐ .menu
-┋ ⭐ .owner
+╔════════ *👥 GROUP MENU* ═════╗
+║ ➤ .open 🔓
+║ ➤ .close 🔒
+║ ➤ .kick 👢
+║ ➤ .add ➕
+║ ➤ .promote ⬆️
+║ ➤ .demote ⬇️
+║ ➤ .tagall 📢
+║ ➤ .hidetag 🕶
+║ ➤ .admins 🛡
+║ ➤ .linkgc 🔗
+║ ➤ .ginfo 📋
+║ ➤ .setname 📝
+║ ➤ .setdesc 📄
+╚══════════════════════════════╝
 
-┋ 🔧 TOOLS
-┋ ⭐ .vv
-┋ ⭐ .getpp
-┋ ⭐ .tosticker
-┋ ⭐ .toimg
+╔═══════ *🛡 PROTECTION* ══════╗
+║ ➤ .antilink on/off 🚫🔗
+║ ➤ .antisticker on/off 🚫🖼
+║ ➤ .antimedia on/off 🚫🎥
+║ ➤ .warn ⚠️
+║ ➤ .warnings 📊
+║ ➤ .unwarn ♻️
+║ ➤ .anticall on/off 📵
+║ ➤ .antigroupstatusmention 🚷
+╚══════════════════════════════╝
 
-┋ 👥 GROUP
-┋ ⭐ .kick
-┋ ⭐ .tagall
-┋ ⭐ .antilink on/off
-┋ ⭐ .antisticker on/off
-┋ ⭐ .mute on/off
+╔════════ *🎨 MEDIA TOOLS* ════╗
+║ ➤ .tosticker 🖼➡️🎭
+║ ➤ .toimg 🎭➡️🖼
+║ ➤ .vv 👁
+║ ➤ .getpp 📸
+║ ➤ .save 💾
+║ ➤ .vvinbox 📥
+╚══════════════════════════════╝
 
-┋ ⚙️ OWNER
-┋ ⭐ .setprefix
-┋ ⭐ .mode public/private
-┋ ⭐ .addsudo
-┋ ⭐ .delsudo
-┋ ⭐ .listsudo
+╔════════ *👑 OWNER MENU* ═════╗
+║ ➤ .setprefix ⚙
+║ ➤ .mode 🌍
+║ ➤ .restart 🔄
+║ ➤ .addsudo ➕👤
+║ ➤ .delsudo ➖👤
+║ ➤ .listsudo 📜
+║ ➤ .block 🚫
+║ ➤ .unblock ♻️
+║ ➤ .broadcast 📢
+║ ➤ .join 🔗
+║ ➤ .leave 🚪
+╚══════════════════════════════╝
 
-╰┄┄┄┄┄┈┈┈┈┄┄┄◈
-> Acha mzaha na maisha
-`)
+╔═══════ *🤖 AUTOMATION* ══════╗
+║ ➤ .autoreply 💬
+║ ➤ .autoview 👀
+║ ➤ .autosave 💾
+║ ➤ .alwaysonline 🟢
+║ ➤ .autobio 📝
+║ ➤ .newsletter 📰
+╚══════════════════════════════╝
+
+╔════════ *⚡ EXTRA TOOLS* ════╗
+║ ➤ .sticker 🎭
+║ ➤ .trash 🗑
+║ ➤ .getmenupic 🖼
+║ ➤ .prefixinfo ℹ️
+║ ➤ .channelid 📡
+║ ➤ .myid 🆔
+╚══════════════════════════════╝
+
+╔══════════════════════════════╗
+║   _Acha mzaha na maisha_ 🔥
+╚══════════════════════════════╝
+`
         });
         break;
 
@@ -178,7 +195,7 @@ async function startBot() {
         break;
 
       case "ping":
-        await sock.sendMessage(from, { text: wm("⚡ Ultra fast response.") });
+        await sock.sendMessage(from, { text: wm("⚡ Pong!") });
         break;
 
       case "owner":
@@ -190,54 +207,40 @@ async function startBot() {
       case "setprefix":
         if (!isOwner) return;
         PREFIX = args[0] || ".";
-        await sock.sendMessage(from, {
-          text: wm(`Prefix changed to ${PREFIX}`)
-        });
+        await sock.sendMessage(from, { text: wm(`Prefix changed to ${PREFIX}`) });
         break;
 
       case "mode":
         if (!isOwner) return;
         MODE = args[0] || "public";
-        await sock.sendMessage(from, {
-          text: wm(`Mode changed to ${MODE}`)
-        });
+        await sock.sendMessage(from, { text: wm(`Mode changed to ${MODE}`) });
         break;
 
       case "antilink":
         antilink[from] = args[0] === "on";
-        await sock.sendMessage(from, {
-          text: wm(`Antilink ${args[0]}`)
-        });
+        await sock.sendMessage(from, { text: wm(`Antilink ${args[0]}`) });
         break;
 
       case "antisticker":
         antisticker[from] = args[0] === "on";
-        await sock.sendMessage(from, {
-          text: wm(`Antisticker ${args[0]}`)
-        });
+        await sock.sendMessage(from, { text: wm(`Antisticker ${args[0]}`) });
         break;
 
       case "mute":
         mute[from] = args[0] === "on";
-        await sock.sendMessage(from, {
-          text: wm(`Mute ${args[0]}`)
-        });
+        await sock.sendMessage(from, { text: wm(`Mute ${args[0]}`) });
         break;
 
       case "addsudo":
         if (!isOwner) return;
         sudo.push(args[0]);
-        await sock.sendMessage(from, {
-          text: wm(`Added sudo ${args[0]}`)
-        });
+        await sock.sendMessage(from, { text: wm(`Added sudo ${args[0]}`) });
         break;
 
       case "delsudo":
         if (!isOwner) return;
         sudo = sudo.filter(x => x !== args[0]);
-        await sock.sendMessage(from, {
-          text: wm(`Removed sudo ${args[0]}`)
-        });
+        await sock.sendMessage(from, { text: wm(`Removed sudo ${args[0]}`) });
         break;
 
       case "listsudo":
@@ -254,7 +257,7 @@ async function startBot() {
   });
 
   const app = express();
-  const PORT = process.env.PORT || 8080;
+  const PORT = process.env.PORT || 10000;
 
   app.get("/", (req, res) => {
     res.send(`${BOT_NAME} running`);
