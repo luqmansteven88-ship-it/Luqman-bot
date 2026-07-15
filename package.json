@@ -1,16 +1,18 @@
 {
   "name": "luqman-md",
-  "version": "5.0.1",
-  "description": "LUQMAN MD Railway Bot",
+  "version": "5.0.0",
+  "description": "WhatsApp Multi-Device Bot Powered by Luqman SJ",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.18",
-    "express": "^4.19.2",
-    "pino": "^9.1.0",
-    "qrcode-terminal": "^0.12.0"
+    "@whiskeysockets/baileys": "^6.6.0",
+    "@hapi/boom": "^10.0.1",
+    "pino": "^8.19.0",
+    "qrcode-terminal": "^0.12.0",
+    "awesome-phonenumber": "^5.10.0"
   },
-  "author": "LUQMAN SJ"
+  "author": "LUQMAN SJ",
+  "license": "MIT"
 }
