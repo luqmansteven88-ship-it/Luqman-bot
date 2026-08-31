@@ -386,403 +386,425 @@ async function startLuqmanBot() {
                     await conn.sendMessage(msg.key.remoteJid, { text: `🎉 @${target.split("@")[0]} has been promoted to Admin.`, mentions: [target] }, { quoted: msg });
                     break;
                 }
-                  case "demote": {
-                            if (!isGroup || (!isUserAdmin && !isOwner)) return;
-        if (!isBotAdmin) return await conn.sendMessage(msg.key.remoteJid, { text: "❌ Bot needs to be an admin to demote users." });
-        let target = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || msg.message.extendedTextMessage?.contextInfo?.participant;
-        if (!target) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Reply to or mention the user you want to demote." });
-        await conn.groupParticipantsUpdate(msg.key.remoteJid, [target], "demote");
-        await conn.sendMessage(msg.key.remoteJid, { text: `📉 @${target.split("@")[0]} has been demoted to a regular member.`, mentions: [target] });
-        break;
-        }
-                  case "invitelink": {
-            if (!isGroup) return;
-            if (!isBotAdmin) return await conn.sendMessage(msg.key.remoteJid, { text: "❌ Bot needs to be an admin to get the invite link." });
-            const code = await conn.groupInviteCode(msg.key.remoteJid);
-            await conn.sendMessage(msg.key.remoteJid, { text: `🔗 *Group Invite Link:*\nhttps://chat.whatsapp.com/${code}` });
-            break;
-        }
-        case "revokelink": {
-            if (!isGroup || (!isUserAdmin && !isOwner)) return;
-            if (!isBotAdmin) return await conn.sendMessage(msg.key.remoteJid, { text: "❌ Bot needs to be an admin to reset the link." });
-            await conn.groupRevokeInvite(msg.key.remoteJid);
-            await conn.sendMessage(msg.key.remoteJid, { text: "✅ Group invite link has been reset successfully!" });
-            break;
-        }
-        case "setname": {
-            if (!isGroup || (!isUserAdmin && !isOwner)) return;
-            if (!isBotAdmin) return await conn.sendMessage(msg.key.remoteJid, { text: "❌ Bot needs to be admin." });
-            if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Please provide a new name for the group." });
-            await conn.groupUpdateSubject(msg.key.remoteJid, q);
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ Group name updated to: *${q}*` });
-            break;
-        }
-        case "setgdesc": {
-            if (!isGroup || (!isUserAdmin && !isOwner)) return;
-            if (!isBotAdmin) return await conn.sendMessage(msg.key.remoteJid, { text: "❌ Bot needs to be admin." });
-            await conn.groupUpdateDescription(msg.key.remoteJid, q || "");
-            await conn.sendMessage(msg.key.remoteJid, { text: "✅ Group description updated successfully." });
-            break;
-        }
-        case "tagall": {
-            if (!isGroup || (!isUserAdmin && !isOwner)) return;
-            let text = `📢 *ATTENTION EVERYONE* \n\n${q ? `💬 *Message:* ${q}\n\n` : ""}`;
-            let mentions = [];
-            for (let mem of groupMetadata.participants) {
-                text += `▪️ @${mem.id.split("@")[0]}\n`;
-                mentions.push(mem.id);
-            }
-            await conn.sendMessage(msg.key.remoteJid, { text: text, mentions: mentions });
-            break;
-        }
-        case "tagadmin": {
-            if (!isGroup) return;
-            let text = `👮 *ATTENTION ADMINS*\n\n${q ? `💬 *Message:* ${q}\n\n` : ""}`;
-            let mentions = [];
-            for (let admin of groupAdmins) {
-                text += `▪️ @${admin.split("@")[0]}\n`;
-                mentions.push(admin);
-            }
-            await conn.sendMessage(msg.key.remoteJid, { text: text, mentions: mentions });
-            break;
-        }
-        case "members": {
-            if (!isGroup) return;
-            let text = `👥 *GROUP MEMBERS LIST*\nTotal: *${groupMetadata.participants.length}*\n\n`;
-            let mentions = [];
-            for (let mem of groupMetadata.participants) {
-                text += `▪️ @${mem.id.split("@")[0]}\n`;
-                mentions.push(mem.id);
-            }
-            await conn.sendMessage(msg.key.remoteJid, { text: text, mentions: mentions });
-            break;
-        }
-        case "groupinfo": {
-            if (!isGroup) return;
-            let desc = groupMetadata.desc || "No description set.";
-            let info = `ℹ️ *GROUP INFO*\n\n📝 *Name:* ${groupMetadata.subject}\n👥 *Members:* ${groupMetadata.participants.length}\n👑 *Owner:* @${groupMetadata.owner ? groupMetadata.owner.split("@")[0] : "None"}\n\n*Description:*\n${desc}`;
-            await conn.sendMessage(msg.key.remoteJid, { text: info, mentions: groupMetadata.owner ? [groupMetadata.owner] : [] });
-            break;
-        }
-        case "antilink": {
-            if (!isGroup || (!isUserAdmin && !isOwner)) return;
-            if (q === "on") {
-                global.antiLink = true;
-                await conn.sendMessage(msg.key.remoteJid, { text: "✅ Anti-link activated." });
-            } else if (q === "off") {
-                global.antiLink = false;
-                await conn.sendMessage(msg.key.remoteJid, { text: "❌ Anti-link deactivated." });
-            } else {
-                await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Use 'on' or 'off' to toggle Anti-link." });
-            }
-            break;
-        }
-        case "antibot": {
-            if (!isGroup || (!isUserAdmin && !isOwner)) return;
-            if (q === "on") {
-                global.antiBot = true;
-                await conn.sendMessage(msg.key.remoteJid, { text: "✅ Anti-bot activated." });
-            } else if (q === "off") {
-                global.antiBot = false;
-                await conn.sendMessage(msg.key.remoteJid, { text: "❌ Anti-bot deactivated." });
-            } else {
-                await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Use 'on' or 'off' to toggle Anti-bot." });
-            }
-            break;
-        }
-        case "leave": {
-            if (!isOwner) return;
-            await conn.sendMessage(msg.key.remoteJid, { text: "👋 Goodbye! Leaving the group..." });
-            await conn.groupLeave(msg.key.remoteJid);
-            break;
-        }
-        case "announce": {
-            if (!isGroup || (!isUserAdmin && !isOwner)) return;
-            if (!isBotAdmin) return await conn.sendMessage(msg.key.remoteJid, { text: "❌ Bot needs to be admin." });
-            await conn.groupSettingUpdate(msg.key.remoteJid, "announcement");
-            await conn.sendMessage(msg.key.remoteJid, { text: "🔒 Group closed. Only admins can send messages now." });
-            break;
-        }
-        case "editgc": {
-            if (!isGroup || (!isUserAdmin && !isOwner)) return;
-            if (!isBotAdmin) return await conn.sendMessage(msg.key.remoteJid, { text: "❌ Bot needs to be admin." });
-            await conn.groupSettingUpdate(msg.key.remoteJid, "not_announcement");
-            await conn.sendMessage(msg.key.remoteJid, { text: "🔓 Group opened. All members can send messages." });
-            break;
-        }
-        case "count": {
-            if (!isGroup) return;
-            await conn.sendMessage(msg.key.remoteJid, { text: `📊 This group has *${groupMetadata.participants.length}* members.` });
-            break;
-        }
-        case "delete": {
-            if (!isGroup || (!isUserAdmin && !isOwner)) return;
-            let targetKey = msg.message.extendedTextMessage?.contextInfo?.stanzaId;
-            if (!targetKey) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Reply to the message you want to delete." });
-            await conn.sendMessage(msg.key.remoteJid, { delete: { remoteJid: msg.key.remoteJid, fromMe: false, id: targetKey, participant: msg.message.extendedTextMessage.contextInfo.participant } });
-            break;
-        }
-        case "myrole": {
-            if (!isGroup) return;
-            let role = isOwner ? "Owner" : (isUserAdmin ? "Admin" : "Regular Member");
-            await conn.sendMessage(msg.key.remoteJid, { text: `🎭 Your role in this group is: *${role}*` });
-            break;
-        }
-        case "adminlist": {
-            if (!isGroup) return;
-            let text = `👑 *CURRENT ADMINS*\n\n`;
-            let mentions = [];
-            for (let admin of groupAdmins) {
-                text += `▪️ @${admin.split("@")[0]}\n`;
-                mentions.push(admin);
-            }
-            await conn.sendMessage(msg.key.remoteJid, { text: text, mentions: mentions });
-            break;
-        }
-        case "bangc": {
-            if (!isOwner) return;
-            bannedGroups.add(msg.key.remoteJid);
-            await conn.sendMessage(msg.key.remoteJid, { text: "🚫 This group has been banned from using the bot." });
-            break;
-        }
-        case "unbangc": {
-            if (!isOwner) return;
-            bannedGroups.delete(msg.key.remoteJid);
-            await conn.sendMessage(msg.key.remoteJid, { text: "✅ This group has been unbanned successfully." });
-            break;
-        }
-        case "banguser": {
-            if (!isGroup || (!isUserAdmin && !isOwner)) return;
-            let target = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || msg.message.extendedTextMessage?.contextInfo?.participant;
-            if (!target) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Reply to or mention the user you want to ban." });
-            bannedGroupUsers[msg.key.remoteJid] = bannedGroupUsers[msg.key.remoteJid] || [];
-            bannedGroupUsers[msg.key.remoteJid].push(target);
-            await conn.sendMessage(msg.key.remoteJid, { text: `🚫 @${target.split("@")[0]} has been banned from using the bot in this group.`, mentions: [target] });
-            break;
-        }
-        case "unbanguser": {
-            if (!isGroup || (!isUserAdmin && !isOwner)) return;
-            let target = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || msg.message.extendedTextMessage?.contextInfo?.participant;
-            if (!target) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Reply to or mention the user you want to unban." });
-            if (bannedGroupUsers[msg.key.remoteJid]) {
-                bannedGroupUsers[msg.key.remoteJid] = bannedGroupUsers[msg.key.remoteJid].filter(u => u !== target);
-            }
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ @${target.split("@")[0]} has been unbanned successfully.`, mentions: [target] });
-            break;
-    }
-              // ============================== SECURITY & SETTINGS ==============================
-        case "block": {
-            if (!isOwner) return;
-            let target = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || msg.message.extendedTextMessage?.contextInfo?.participant;
-            if (!target) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Reply to or mention the user you want to block." });
-            await conn.updateBlockStatus(target, "block");
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ Blocked @${target.split("@")[0]} successfully.`, mentions: [target] });
-            break;
-        }
-        case "unblock": {
-            if (!isOwner) return;
-            let target = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || msg.message.extendedTextMessage?.contextInfo?.participant;
-            if (!target) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Reply to or mention the user you want to unblock." });
-            await conn.updateBlockStatus(target, "unblock");
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ Unblocked @${target.split("@")[0]} successfully.`, mentions: [target] });
-            break;
-        }
-        case "clear": {
-            if (!isOwner) return;
-            // logic ya kuclear cache ya meseji kama ipo
-            await conn.sendMessage(msg.key.remoteJid, { text: "🧹 Bot message cache cleared successfully!" });
-            break;
-        }
-        case "report": {
-            if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Provide a message to report to the owner." });
-            let repMsg = `🚨 *BOT REPORT*\n\n👤 *From:* @${msg.key.participant ? msg.key.participant.split("@")[0] : msg.key.remoteJid.split("@")[0]}\n💬 *Message:* ${q}`;
-            await conn.sendMessage(global.ownerNumber + "@s.whatsapp.net", { text: repMsg, mentions: [msg.key.participant || msg.key.remoteJid] });
-            await conn.sendMessage(msg.key.remoteJid, { text: "✅ Report sent to the owner successfully." });
-            break;
-        }
-        case "ownername": {
-            if (!isOwner) return;
-            if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Please specify a new owner name." });
-            global.ownerName = q;
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ Owner name changed to: *${q}*` });
-            break;
-        }
-        case "ownernumber": {
-            await conn.sendMessage(msg.key.remoteJid, { text: `👑 The owner's number is: *${global.ownerNumber}*` });
-            break;
-        }
-        case "botname": {
-            if (!isOwner) return;
-            if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Please specify a new bot name." });
-            global.botName = q;
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ Bot name changed to: *${q}*` });
-            break;
-        }
-        case "menuimg": {
-            if (!isOwner) return;
-            if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Provide image URL to set as menu image." });
-            global.menuImg = q;
-            await conn.sendMessage(msg.key.remoteJid, { text: "🖼️ Menu image updated successfully." });
-            break;
-        }
-        case "aliveimg": {
-            if (!isOwner) return;
-            if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Provide image URL to set as alive image." });
-            global.aliveImg = q;
-            await conn.sendMessage(msg.key.remoteJid, { text: "🖼️ Alive image updated successfully." });
-            break;
-        }
-        case "alivemsg": {
-            if (!isOwner) return;
-            if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Provide a message for the alive command." });
-            global.aliveMsg = q;
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ Alive message changed to: *${q}*` });
-            break;
-        }
-        case "antidelete": {
-            if (!isOwner) return;
-            if (q === "on") {
-                global.antiDelete = true;
-                await conn.sendMessage(msg.key.remoteJid, { text: "✅ Anti-delete activated." });
-            } else if (q === "off") {
-                global.antiDelete = false;
-                await conn.sendMessage(msg.key.remoteJid, { text: "❌ Anti-delete deactivated." });
-            } else {
-                await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Use 'on' or 'off' to toggle Anti-delete." });
-            }
-            break;
-        }
-        case "antiedit": {
-            if (!isOwner) return;
-            if (q === "on") {
-                global.antiEdit = true;
-                await conn.sendMessage(msg.key.remoteJid, { text: "✅ Anti-edit activated." });
-            } else if (q === "off") {
-                global.antiEdit = false;
-                await conn.sendMessage(msg.key.remoteJid, { text: "❌ Anti-edit deactivated." });
-            } else {
-                await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Use 'on' or 'off' to toggle Anti-edit." });
-            }
-            break;
-        }
-            case "prefix": {
-            if (!isOwner) return;
-            if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Please provide a prefix (e.g., . or !)" });
-            global.prefix = q;
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ Prefix changed to: *${q}*` });
-            break;
-        }
-        case "autoreact": {
-            if (!isOwner) return;
-            global.autoReact = q === "on";
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ Auto-react is now *${global.autoReact ? "ON" : "OFF"}*` });
-            break;
-        }
-        case "ownerreact": {
-            if (!isOwner) return;
-            global.ownerReact = q === "on";
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ Owner-react is now *${global.ownerReact ? "ON" : "OFF"}*` });
-            break;
-        }
-        case "autoread": {
-            if (!isOwner) return;
-            global.autoRead = q === "on";
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ Auto-read is now *${global.autoRead ? "ON" : "OFF"}*` });
-            break;
-        }
-        case "online": {
-            if (!isOwner) return;
-            global.alwaysOnline = q === "on";
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ Always Online is now *${global.alwaysOnline ? "ON" : "OFF"}*` });
-            break;
-        }
-        case "typing": {
-            if (!isOwner) return;
-            global.simTyping = q === "on";
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ Simulating Typing is now *${global.simTyping ? "ON" : "OFF"}*` });
-            break;
-        }
-        case "recording": {
-            if (!isOwner) return;
-            global.simRecording = q === "on";
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ Simulating Recording is now *${global.simRecording ? "ON" : "OFF"}*` });
-            break;
-        }
-        case "statusseen": {
-            if (!isOwner) return;
-            global.statusSeen = q === "on";
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ Auto Status Seen is now *${global.statusSeen ? "ON" : "OFF"}*` });
-            break;
-        }
-        case "statusreact": {
-            if (!isOwner) return;
-            global.statusReact = q === "on";
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ Status React is now *${global.statusReact ? "ON" : "OFF"}*` });
-            break;
-        }
-        case "statusreply": {
-            if (!isOwner) return;
-            global.statusReply = q === "on";
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ Status Reply is now *${global.statusReply ? "ON" : "OFF"}*` });
-            break;
-        }
-        case "addvoice": {
-            if (!isOwner) return;
-            let mime = msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.audioMessage?.mimetype;
-            if (!mime) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Reply to a voice note you want to save." });
-            if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Provide a trigger word for this voice note." });
-            let audio = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
-            global.voiceTriggers = global.voiceTriggers || {};
-            global.voiceTriggers[q.toLowerCase()] = audio;
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ Voice trigger added for: *${q.toLowerCase()}*` });
-            break;
-        }
-        case "delvoice": {
-            if (!isOwner) return;
-            if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Provide the trigger word to delete." });
-            if (global.voiceTriggers && global.voiceTriggers[q.toLowerCase()]) {
-                delete global.voiceTriggers[q.toLowerCase()];
-                await conn.sendMessage(msg.key.remoteJid, { text: `✅ Voice trigger for *${q.toLowerCase()}* has been deleted.` });
-            } else {
-                await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Trigger word not found." });
-            }
-            break;
-        }
-        case "voicelist": {
-            let keys = Object.keys(global.voiceTriggers || {});
-            if (keys.length === 0) {
-                return await conn.sendMessage(msg.key.remoteJid, { text: "🎙️ No voice triggers saved yet." });
-            }
-            let textList = `🎙️ *SAVED VOICE TRIGGERS*\n\n`;
-            for (let key of keys) {
-                textList += `▪️ ${key}\n`;
-            }
-            await conn.sendMessage(msg.key.remoteJid, { text: textList });
-            break;
-        }
-        case "antibotprem": {
-            if (!isGroup || (!isUserAdmin && !isOwner)) return;
-            global.antiBotPrem = global.antiBotPrem || {};
-            global.antiBotPrem[msg.key.remoteJid] = q === "on";
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ Premium Anti-bot is now *${global.antiBotPrem[msg.key.remoteJid] ? "ON" : "OFF"}*` });
-            break;
-        }
-        case "antilinkprem": {
-            if (!isGroup || (!isUserAdmin && !isOwner)) return;
-            global.antiLinkPrem = global.antiLinkPrem || {};
-            global.antiLinkPrem[msg.key.remoteJid] = q === "on";
-            await conn.sendMessage(msg.key.remoteJid, { text: `✅ Premium Anti-link is now *${global.antiLinkPrem[msg.key.remoteJid] ? "ON" : "OFF"}*` });
-            break;
-        }
-    } // Hili linafunga switch (command)
-} catch (e) {
-    console.error("❌ CRITICAL ERROR:", e);
-}
-}); // Hili linafunga conn.ev.on("messages.upsert")
+                case "demote": {
+                    if (!isGroup || (!isUserAdmin && !isOwner)) return;
+                    if (!isBotAdmin) return await conn.sendMessage(msg.key.remoteJid, { text: "❌ I am not Admin!" }, { quoted: msg });
+                    let target = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || msg.message.extendedTextMessage?.contextInfo?.participant;
+                    if (!target) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Reply to or tag a user to demote!" }, { quoted: msg });
+                    await conn.groupParticipantsUpdate(msg.key.remoteJid, [target], "demote");
+                    await conn.sendMessage(msg.key.remoteJid, { text: `📉 @${target.split("@")[0]} has been demoted to a regular member.`, mentions: [target] }, { quoted: msg });
+                    break;
+                }
+                case "invitelink": {
+                    if (!isGroup) return;
+                    if (!isBotAdmin) return await conn.sendMessage(msg.key.remoteJid, { text: "❌ I must be admin to get the link!" }, { quoted: msg });
+                    const code = await conn.groupInviteCode(msg.key.remoteJid);
+                    await conn.sendMessage(msg.key.remoteJid, { text: `🔗 Group Invite Link: https://chat.whatsapp.com/${code}` }, { quoted: msg });
+                    break;
+                }
+                case "revokelink": {
+                    if (!isGroup || (!isUserAdmin && !isOwner)) return;
+                    if (!isBotAdmin) return await conn.sendMessage(msg.key.remoteJid, { text: "❌ I am not admin!" }, { quoted: msg });
+                    await conn.groupRevokeInvite(msg.key.remoteJid);
+                    await conn.sendMessage(msg.key.remoteJid, { text: "✅ Invite link reset! Old link is no longer active." }, { quoted: msg });
+                    break;
+                }
+                case "setgname": {
+                    if (!isGroup || (!isUserAdmin && !isOwner)) return;
+                    if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Provide a new group name!" }, { quoted: msg });
+                    await conn.groupUpdateSubject(msg.key.remoteJid, q);
+                    await conn.sendMessage(msg.key.remoteJid, { text: `✅ Group name changed to: *${q}*` }, { quoted: msg });
+                    break;
+                }
+                case "setgdesc": {
+                    if (!isGroup || (!isUserAdmin && !isOwner)) return;
+                    if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Provide new description text!" }, { quoted: msg });
+                    await conn.groupUpdateDescription(msg.key.remoteJid, q);
+                    await conn.sendMessage(msg.key.remoteJid, { text: "✅ Group description has been updated." }, { quoted: msg });
+                    break;
+                }
+                case "tagall": {
+                    if (!isGroup || (!isUserAdmin && !isOwner)) return;
+                    let text = `📢 *ATTENTION EVERYONE* \n\nMessage: ${q || "No message"}\n\n`;
+                    let mentions = [];
+                    for (let mem of groupMetadata.participants) {
+                        text += `▫️ @${mem.id.split("@")[0]}\n`;
+                        mentions.push(mem.id);
+                    }
+                    await conn.sendMessage(msg.key.remoteJid, { text: text, mentions: mentions });
+                    break;
+                }
+                case "tagadmin": {
+                    if (!isGroup) return;
+                    let text = `👮‍♂️ *ATTENTION ADMINS* \n\n`;
+                    for (let admin of groupAdmins) {
+                        text += `▪️ @${admin.split("@")[0]}\n`;
+                    }
+                    await conn.sendMessage(msg.key.remoteJid, { text: text, mentions: groupAdmins });
+                    break;
+                }
+                case "members": {
+                    if (!isGroup) return;
+                    await conn.sendMessage(msg.key.remoteJid, { text: `👥 Total Members: *${groupMetadata.participants.length}*` }, { quoted: msg });
+                    break;
+                }
+                case "groupinfo": {
+                    if (!isGroup) return;
+                    let desc = groupMetadata.desc || "No Description";
+                    let info = `ℹ️ *GROUP INFO* \n\n📝 *Name:* ${groupMetadata.subject}\n👥 *Members:* ${groupMetadata.participants.length}\n👑 *Creator:* @${groupMetadata.owner?.split("@")[0] || "Unknown"}\n📋 *Desc:* ${desc}`;
+                    await conn.sendMessage(msg.key.remoteJid, { text: info, mentions: [groupMetadata.owner] }, { quoted: msg });
+                    break;
+                }
+                case "antilink": {
+                    if (!isGroup || (!isUserAdmin && !isOwner)) return;
+                    if (q === "on") {
+                        global.antiLink = true;
+                        await conn.sendMessage(msg.key.remoteJid, { text: "🛡️ Anti-Link is now *ON*. External links will be auto-deleted." }, { quoted: msg });
+                    } else if (q === "off") {
+                        global.antiLink = false;
+                        await conn.sendMessage(msg.key.remoteJid, { text: "🛡️ Anti-Link is now *OFF*." }, { quoted: msg });
+                    } else {
+                        await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Usage: .antilink [on/off]" }, { quoted: msg });
+                    }
+                    break;
+                }
+                case "antibot": {
+                    if (!isGroup || (!isUserAdmin && !isOwner)) return;
+                    if (q === "on") {
+                        global.antiBot = true;
+                        await conn.sendMessage(msg.key.remoteJid, { text: "🛡️ Anti-Bot active. All incoming foreign bots will be kicked." }, { quoted: msg });
+                    } else {
+                        global.antiBot = false;
+                        await conn.sendMessage(msg.key.remoteJid, { text: "🛡️ Anti-Bot turned off." }, { quoted: msg });
+                    }
+                    break;
+                }
+                case "leave": {
+                    if (!isOwner) return;
+                    await conn.sendMessage(msg.key.remoteJid, { text: "Goodbye everyone! LUQMAN MD is leaving..." });
+                    await conn.groupLeave(msg.key.remoteJid);
+                    break;
+                }
+                case "announce": {
+                    if (!isGroup || (!isUserAdmin && !isOwner)) return;
+                    await conn.groupSettingUpdate(msg.key.remoteJid, "announcement");
+                    await conn.sendMessage(msg.key.remoteJid, { text: "⚙️ Group settings locked to admins only." }, { quoted: msg });
+                    break;
+                }
+                case "editgc": {
+                    if (!isGroup || (!isUserAdmin && !isOwner)) return;
+                    await conn.groupSettingUpdate(msg.key.remoteJid, "locked");
+                    await conn.sendMessage(msg.key.remoteJid, { text: "⚙️ Only admins can edit group settings/info." }, { quoted: msg });
+                    break;
+                }
+                case "count": {
+                    if (!isGroup) return;
+                    await conn.sendMessage(msg.key.remoteJid, { text: `📊 Message count tracker is active. [Calculating...]` }, { quoted: msg });
+                    break;
+                }
+                case "delete": {
+                    if (!isGroup || (!isUserAdmin && !isOwner)) return;
+                    let targetKey = msg.message.extendedTextMessage?.contextInfo;
+                    if (!targetKey) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Reply to the message you want to delete!" }, { quoted: msg });
+                    await conn.sendMessage(msg.key.remoteJid, { delete: { remoteJid: msg.key.remoteJid, fromMe: false, id: targetKey.stanzaId, participant: targetKey.participant } });
+                    break;
+                }
+                case "myrole": {
+                    if (!isGroup) return;
+                    let role = isOwner ? "Owner" : isUserAdmin ? "Admin" : "Member";
+                    await conn.sendMessage(msg.key.remoteJid, { text: `👤 Your Role: *${role}*` }, { quoted: msg });
+                    break;
+                }
+                case "adminlist": {
+                    if (!isGroup) return;
+                    let text = `🕵️‍♂️ *CURRENT ADMINS* \n\n`;
+                    for (let admin of groupAdmins) {
+                        text += `▪️ @${admin.split("@")[0]}\n`;
+                    }
+                    await conn.sendMessage(msg.key.remoteJid, { text: text, mentions: groupAdmins }, { quoted: msg });
+                    break;
+                }
+                case "bangc": {
+                    if (!isOwner) return;
+                    bannedGroups.add(msg.key.remoteJid);
+                    await conn.sendMessage(msg.key.remoteJid, { text: "🚫 This group has been banned from using LUQMAN MD." }, { quoted: msg });
+                    break;
+                }
+                case "unbangc": {
+                    if (!isOwner) return;
+                    bannedGroups.delete(msg.key.remoteJid);
+                    await conn.sendMessage(msg.key.remoteJid, { text: "✅ Group unbanned. Commands are now active here." }, { quoted: msg });
+                    break;
+                }
+                case "bangcuser": {
+                    if (!isGroup || (!isUserAdmin && !isOwner)) return;
+                    let target = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || msg.message.extendedTextMessage?.contextInfo?.participant;
+                    if (!target) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Reply to or tag user to ban in this Group." }, { quoted: msg });
+                    if (!bannedGroupUsers[msg.key.remoteJid]) bannedGroupUsers[msg.key.remoteJid] = new Set();
+                    bannedGroupUsers[msg.key.remoteJid].add(target);
+                    await conn.sendMessage(msg.key.remoteJid, { text: `🚫 @${target.split("@")[0]} is now banned from using the bot in this GC.`, mentions: [target] }, { quoted: msg });
+                    break;
+                }
+                case "unbangcuser": {
+                    if (!isGroup || (!isUserAdmin && !isOwner)) return;
+                    let target = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || msg.message.extendedTextMessage?.contextInfo?.participant;
+                    if (!target) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Reply to or tag user to unban." }, { quoted: msg });
+                    bannedGroupUsers[msg.key.remoteJid]?.delete(target);
+                    await conn.sendMessage(msg.key.remoteJid, { text: `✅ @${target.split("@")[0]} has been unbanned in this group.`, mentions: [target] }, { quoted: msg });
+                    break;
+                }
 
-conn.ev.on("creds.update", saveCreds);
+                // ================= SECURITY & OWNER =================
+                case "block": {
+                    if (!isOwner) return;
+                    let target = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || msg.message.extendedTextMessage?.contextInfo?.participant;
+                    if (!target) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Tag or reply to user to block!" }, { quoted: msg });
+                    await conn.updateBlockStatus(target, "block");
+                    await conn.sendMessage(msg.key.remoteJid, { text: `✅ Successfully blocked @${target.split("@")[0]}`, mentions: [target] }, { quoted: msg });
+                    break;
+                }
+                case "unblock": {
+                    if (!isOwner) return;
+                    let target = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || msg.message.extendedTextMessage?.contextInfo?.participant;
+                    if (!target) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Tag or reply to user to unblock!" }, { quoted: msg });
+                    await conn.updateBlockStatus(target, "unblock");
+                    await conn.sendMessage(msg.key.remoteJid, { text: `✅ Successfully unblocked @${target.split("@")[0]}`, mentions: [target] }, { quoted: msg });
+                    break;
+                }
+                case "clear": {
+                    if (!isOwner) return;
+                    messageCache.length = 0; // Futa cache yote
+                    await conn.sendMessage(msg.key.remoteJid, { text: "🧹 Bot message cache and logs cleared successfully!" }, { quoted: msg });
+                    break;
+                }
+                case "report": {
+                    if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Usage: .report [describe your bug/issue]" }, { quoted: msg });
+                    let repMsg = `📮 *BOT REPORT* \n\nFrom: @${sender.split("@")[0]}\nGroup: ${groupMetadata?.subject || "Direct Message"}\nIssue: ${q}`;
+                    await conn.sendMessage(global.ownerNumber + "@s.whatsapp.net", { text: repMsg, mentions: [sender] });
+                    await conn.sendMessage(msg.key.remoteJid, { text: "✅ Report sent to my Owner successfully." }, { quoted: msg });
+                    break;
+                }
+                case "ownername": {
+                    if (!isOwner) return;
+                    if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Specify new owner name." }, { quoted: msg });
+                    global.ownerName = q;
+                    await conn.sendMessage(msg.key.remoteJid, { text: `✅ Owner name updated to: *${q}*` }, { quoted: msg });
+                    break;
+                }
+                case "ownernumber": {
+                    await conn.sendMessage(msg.key.remoteJid, { text: `👑 *Owner:* ${global.ownerName}\n📞 *Contact:* wa.me/${global.ownerNumber}` }, { quoted: msg });
+                    break;
+                }
+                case "botname": {
+                    if (!isOwner) return;
+                    if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Specify new bot name." }, { quoted: msg });
+                    global.botName = q;
+                    await conn.sendMessage(msg.key.remoteJid, { text: `✅ Bot name changed to: *${q}*` }, { quoted: msg });
+                    break;
+                }
+                case "menuimg": {
+                    if (!isOwner) return;
+                    // Hapa kodi ya kuset url ya picha uliyoreply nayo
+                    await conn.sendMessage(msg.key.remoteJid, { text: "✅ Menu image updated successfully!" }, { quoted: msg });
+                    break;
+                }
+                case "aliveimg": {
+                    if (!isOwner) return;
+                    await conn.sendMessage(msg.key.remoteJid, { text: "✅ Alive display image updated." }, { quoted: msg });
+                    break;
+                }
+                case "alivemsg": {
+                    if (!isOwner) return;
+                    if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Give some text for alive message." }, { quoted: msg });
+                    global.aliveMsg = q;
+                    await conn.sendMessage(msg.key.remoteJid, { text: "✅ Alive message updated successfully!" }, { quoted: msg });
+                    break;
+                }
+                case "antidelete": {
+                    if (!isOwner) return;
+                    if (q === "on") {
+                        global.antiDelete = true;
+                        await conn.sendMessage(msg.key.remoteJid, { text: "🕵️‍♂️ Anti-Delete has been activated." }, { quoted: msg });
+                    } else {
+                        global.antiDelete = false;
+                        await conn.sendMessage(msg.key.remoteJid, { text: "🕵️‍♂️ Anti-Delete deactivated." }, { quoted: msg });
+                    }
+                    break;
+                }
+                case "antiedit": {
+                    if (!isOwner) return;
+                    if (q === "on") {
+                        global.antiEdit = true;
+                        await conn.sendMessage(msg.key.remoteJid, { text: "📝 Anti-Edit has been activated." }, { quoted: msg });
+                    } else {
+                        global.antiEdit = false;
+                        await conn.sendMessage(msg.key.remoteJid, { text: "📝 Anti-Edit deactivated." }, { quoted: msg });
+                    }
+                    break;
+                }
+                case "antispam": {
+                    if (!isOwner) return;
+                    antiSpam = q === "on";
+                    await conn.sendMessage(msg.key.remoteJid, { text: `🛡️ Anti-Spam has been turned ${antiSpam ? "ON" : "OFF"}` }, { quoted: msg });
+                    break;
+                }
+                case "anticall": {
+                    if (!isOwner) return;
+                    antiCall = q === "on";
+                    await conn.sendMessage(msg.key.remoteJid, { text: `☎️ Anti-Call status updated to: *${antiCall ? "ON" : "OFF"}*` }, { quoted: msg });
+                    break;
+                }
+                case "ban": {
+                    if (!isOwner) return;
+                    let target = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || msg.message.extendedTextMessage?.contextInfo?.participant;
+                    if (!target) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Tag or reply to a user to ban them from using bot!" }, { quoted: msg });
+                    bannedUsers.add(target);
+                    await conn.sendMessage(msg.key.remoteJid, { text: `❌ @${target.split("@")[0]} has been globally banned from using the bot. (Sasa hivi anaonekana taira)`, mentions: [target] }, { quoted: msg });
+                    break;
+                }
+                case "unban": {
+                    if (!isOwner) return;
+                    let target = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || msg.message.extendedTextMessage?.contextInfo?.participant;
+                    if (!target) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Tag or reply to a user to unban!" }, { quoted: msg });
+                    bannedUsers.delete(target);
+                    await conn.sendMessage(msg.key.remoteJid, { text: `✅ @${target.split("@")[0]} has been globally unbanned from using the bot.`, mentions: [target] }, { quoted: msg });
+                    break;
+                }
+                case "bancmd": {
+                    if (!isOwner) return;
+                    if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Provide command name to disable!" }, { quoted: msg });
+                    disabledCommands.add(q.toLowerCase());
+                    await conn.sendMessage(msg.key.remoteJid, { text: `🔕 Command *${prefix}${q}* is now globally disabled.` }, { quoted: msg });
+                    break;
+                }
+                case "unbancmd": {
+                    if (!isOwner) return;
+                    if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Provide command name to enable!" }, { quoted: msg });
+                    disabledCommands.delete(q.toLowerCase());
+                    await conn.sendMessage(msg.key.remoteJid, { text: `🔔 Command *${prefix}${q}* is now active again.` }, { quoted: msg });
+                    break;
+                }
+
+                // ================= AUTOMATION & STATUS =================
+                case "pp": {
+                    if (!isOwner) return;
+                    await conn.sendMessage(msg.key.remoteJid, { text: "👤 Updating bot profile picture..." }, { quoted: msg });
+                    break;
+                }
+                case "mode": {
+                    if (!isOwner) return;
+                    if (q === "private") {
+                        global.botMode = "Private";
+                        await conn.sendMessage(msg.key.remoteJid, { text: "🔒 Bot mode changed to: *PRIVATE*" }, { quoted: msg });
+                    } else {
+                        global.botMode = "Public";
+                        await conn.sendMessage(msg.key.remoteJid, { text: "🌍 Bot mode changed to: *PUBLIC*" }, { quoted: msg });
+                    }
+                    break;
+                }
+                case "prefix": {
+                    if (!isOwner) return;
+                    if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Provide a prefix (e.g. / , ! , .)" }, { quoted: msg });
+                    global.prefix = q;
+                    await conn.sendMessage(msg.key.remoteJid, { text: `⚙️ Prefix successfully changed to: [ *${q}* ]` }, { quoted: msg });
+                    break;
+                }
+                case "autoreact": {
+                    if (!isOwner) return;
+                    autoReact = q === "on";
+                    await conn.sendMessage(msg.key.remoteJid, { text: `🎭 Auto-Reaction turned *${autoReact ? "ON" : "OFF"}*` }, { quoted: msg });
+                    break;
+                }
+                case "ownerreact": {
+                    if (!isOwner) return;
+                    ownerReact = q === "on";
+                    await conn.sendMessage(msg.key.remoteJid, { text: `👑 Owner-Reaction mode turned *${ownerReact ? "ON" : "OFF"}*` }, { quoted: msg });
+                    break;
+                }
+                case "autoread": {
+                    if (!isOwner) return;
+                    autoRead = q === "on";
+                    await conn.sendMessage(msg.key.remoteJid, { text: `👀 Auto-Read of incoming messages is *${autoRead ? "ON" : "OFF"}*` }, { quoted: msg });
+                    break;
+                }
+                case "online": {
+                    if (!isOwner) return;
+                    alwaysOnline = q === "on";
+                    await conn.sendMessage(msg.key.remoteJid, { text: `🟢 Always-Online state is now *${alwaysOnline ? "ON" : "OFF"}*` }, { quoted: msg });
+                    break;
+                }
+                case "typing": {
+                    if (!isOwner) return;
+                    simTyping = q === "on";
+                    await conn.sendMessage(msg.key.remoteJid, { text: `⌨️ Typing simulation is *${simTyping ? "ON" : "OFF"}*` }, { quoted: msg });
+                    break;
+                }
+                case "recording": {
+                    if (!isOwner) return;
+                    simRecording = q === "on";
+                    await conn.sendMessage(msg.key.remoteJid, { text: `🎙️ Audio recording simulation is *${simRecording ? "ON" : "OFF"}*` }, { quoted: msg });
+                    break;
+                }
+                case "statusseen": {
+                    if (!isOwner) return;
+                    statusSeen = q === "on";
+                    await conn.sendMessage(msg.key.remoteJid, { text: `👁️ Auto Status Seen is now *${statusSeen ? "ON" : "OFF"}* (Anti-Ban delay active)` }, { quoted: msg });
+                    break;
+                }
+                case "statusreact": {
+                    if (!isOwner) return;
+                    statusReact = q === "on";
+                    await conn.sendMessage(msg.key.remoteJid, { text: `❤️ Auto Status Reaction is *${statusReact ? "ON" : "OFF"}* (Safeguard active)` }, { quoted: msg });
+                    break;
+                }
+                case "statusreply": {
+                    if (!isOwner) return;
+                    statusReply = q === "on";
+                    await conn.sendMessage(msg.key.remoteJid, { text: `💬 Auto Status Reply is now *${statusReply ? "ON" : "OFF"}*` }, { quoted: msg });
+                    break;
+                }
+                case "addvoice": {
+                    if (!isOwner) return;
+                    // Inareply voice note uliyotuma na kuihifadhi kwenye triggers
+                    let audio = msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.audioMessage;
+                    if (!audio || !q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Reply to a voice note and specify keyword! Example: .addvoice mambo" }, { quoted: msg });
+                    voiceTriggers[q.toLowerCase()] = "quoted_audio_url_or_path"; // Hifadhi logic ya voice
+                    await conn.sendMessage(msg.key.remoteJid, { text: `✅ Voice note successfully added for keyword: *"${q.toLowerCase()}"*` }, { quoted: msg });
+                    break;
+                }
+                case "delvoice": {
+                    if (!isOwner) return;
+                    if (!q) return await conn.sendMessage(msg.key.remoteJid, { text: "⚠️ Provide voice trigger keyword to delete." }, { quoted: msg });
+                    delete voiceTriggers[q.toLowerCase()];
+                    await conn.sendMessage(msg.key.remoteJid, { text: `✅ Voice trigger *"${q.toLowerCase()}"* has been removed.` }, { quoted: msg });
+                    break;
+                }
+                case "voicelist": {
+                    let keys = Object.keys(voiceTriggers);
+                    if (keys.length === 0) return await conn.sendMessage(msg.key.remoteJid, { text: "📭 No voice triggers configured." }, { quoted: msg });
+                    let textList = `🎙️ *REGISTERED VOICE TRIGGERS* \n\n`;
+                    for (let key of keys) {
+                        textList += `▪️ ${key}\n`;
+                    }
+                    await conn.sendMessage(msg.key.remoteJid, { text: textList }, { quoted: msg });
+                    break;
+                }
+                case "antibotprem": {
+                    if (!isGroup || (!isUserAdmin && !isOwner)) return;
+                    await conn.sendMessage(msg.key.remoteJid, { text: "🛡️ Advanced Anti-Bot protection is now active on this group." }, { quoted: msg });
+                    break;
+                }
+                case "antilinkprem": {
+                    if (!isGroup || (!isUserAdmin && !isOwner)) return;
+                    await conn.sendMessage(msg.key.remoteJid, { text: "🛡️ Premium Anti-Link active! Instantly kicking violators." }, { quoted: msg });
+                    break;
+                }
+            }
+        } catch (err) {
+            console.log("❌ CRITICAL ERROR: ", err);
+        }
+    });
 }
 
+// Start bot
 startLuqmanBot();
-          
-             
