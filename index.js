@@ -386,7 +386,7 @@ async function startLuqmanBot() {
                     await conn.sendMessage(msg.key.remoteJid, { text: `🎉 @${target.split("@")[0]} has been promoted to Admin.`, mentions: [target] }, { quoted: msg });
                     break;
                 }
-                case "demote": {
+                  case "demote": {
                             if (!isGroup || (!isUserAdmin && !isOwner)) return;
         if (!isBotAdmin) return await conn.sendMessage(msg.key.remoteJid, { text: "❌ Bot needs to be an admin to demote users." });
         let target = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || msg.message.extendedTextMessage?.contextInfo?.participant;
@@ -394,8 +394,7 @@ async function startLuqmanBot() {
         await conn.groupParticipantsUpdate(msg.key.remoteJid, [target], "demote");
         await conn.sendMessage(msg.key.remoteJid, { text: `📉 @${target.split("@")[0]} has been demoted to a regular member.`, mentions: [target] });
         break;
-    }
-            }
+        }
                   case "invitelink": {
             if (!isGroup) return;
             if (!isBotAdmin) return await conn.sendMessage(msg.key.remoteJid, { text: "❌ Bot needs to be an admin to get the invite link." });
