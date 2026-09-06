@@ -1,2206 +1,1541 @@
+"use strict";
+
 const {
   default: makeWASocket,
   useMultiFileAuthState,
   DisconnectReason,
-  delay,
-  jidNormalizedUser
+  fetchLatestBaileysVersion,
+  Browsers,
+  delay
 } = require("@whiskeysockets/baileys");
 
 const P = require("pino");
-const { Boom } = require("@hapi/boom");
 const fs = require("fs");
 const path = require("path");
 
-// ==========================================
-// LUQMAN MD CONFIG
-// ==========================================
-const CONFIG = {
-  ownerNumber: "255678716839",
-  ownerName: "LUQMAN SJ",
-  botName: "LUQMAN MD",
-  prefix: ".",
-  authDir: "auth_session",
-  version: "6.0.0"
-};
+// =====================================================
+// LUQMAN MD - CONFIG
+// =====================================================
 
-let conn;
-let reconnecting = false;
+global.ownerNumber = "255678716839";
+global.ownerName = "LUQMAN SJ";
+global.botName = "LUQMAN MD";
+global.prefix = ".";
 
-// ==========================================
+const AUTH_DIR = path.join(__dirname, "auth_session");
+
+if (!fs.existsSync(AUTH_DIR)) {
+  fs.mkdirSync(AUTH_DIR, { recursive: true });
+}
+
+// =====================================================
+// LOGGER
+// =====================================================
+
+const logger = P({
+  level: "silent"
+});
+
+// =====================================================
 // BOT STATE
-// ==========================================
-const state = {
-  botMode: "Public",
-  autoReact: false,
-  ownerReact: false,
-  autoRead: false,
-  alwaysOnline: false,
-  typing: false,
-  recording: false,
-  antiCall: false,
-  antiSpam: false,
-  antiDelete: false,
-  antiEdit: false,
-  statusSeen: false,
-  statusReact: false,
-  statusReply: false,
+// =====================================================
 
-  antiLink: new Set(),
-  bannedUsers: new Set(),
-  bannedGroups: new Set(),
-  bannedGroupUsers: new Map(),
-  disabledCommands: new Set(),
-  warnings: new Map(),
+let sock = null;
+let reconnectTimer = null;
+let pairingRequested = false;
+let shuttingDown = false;
 
-  cache: new Map(),
-  cacheLimit: 150,
+const warnings = new Map();
+const antiLinkGroups = new Set();
+const antiStickerGroups = new Set();
+const mutedGroups = new Set();
 
-  startedAt: Date.now()
-};
+const messageCache = new Map();
 
-// ==========================================
-// DATA / SETTINGS
-// ==========================================
-const dataDir = path.join(process.cwd(), "data");
-const settingsFile = path.join(dataDir, "settings.json");
+const MAX_CACHE = 300;
 
-fs.mkdirSync(dataDir, { recursive: true });
-
-function loadSettings() {
-  try {
-    if (!fs.existsSync(settingsFile)) return;
-
-    const raw = JSON.parse(
-      fs.readFileSync(settingsFile, "utf8")
-    );
-
-    Object.assign(state, {
-      botMode: raw.botMode ?? "Public",
-      autoReact: !!raw.autoReact,
-      ownerReact: !!raw.ownerReact,
-      autoRead: !!raw.autoRead,
-      alwaysOnline: !!raw.alwaysOnline,
-      typing: !!raw.typing,
-      recording: !!raw.recording,
-      antiCall: !!raw.antiCall,
-      antiSpam: !!raw.antiSpam,
-      antiDelete: !!raw.antiDelete,
-      antiEdit: !!raw.antiEdit,
-      statusSeen: !!raw.statusSeen,
-      statusReact: !!raw.statusReact,
-      statusReply: !!raw.statusReply,
-
-      antiLink: new Set(raw.antiLink || []),
-      bannedUsers: new Set(raw.bannedUsers || []),
-      bannedGroups: new Set(raw.bannedGroups || []),
-      disabledCommands: new Set(raw.disabledCommands || [])
-    });
-
-  } catch (e) {
-    console.log(
-      "⚠️ Could not load settings:",
-      e.message
-    );
-  }
-}
-
-function saveSettings() {
-  try {
-    fs.writeFileSync(
-      settingsFile,
-      JSON.stringify(
-        {
-          botMode: state.botMode,
-          autoReact: state.autoReact,
-          ownerReact: state.ownerReact,
-          autoRead: state.autoRead,
-          alwaysOnline: state.alwaysOnline,
-          typing: state.typing,
-          recording: state.recording,
-          antiCall: state.antiCall,
-          antiSpam: state.antiSpam,
-          antiDelete: state.antiDelete,
-          antiEdit: state.antiEdit,
-          statusSeen: state.statusSeen,
-          statusReact: state.statusReact,
-          statusReply: state.statusReply,
-
-          antiLink: [...state.antiLink],
-          bannedUsers: [...state.bannedUsers],
-          bannedGroups: [...state.bannedGroups],
-          disabledCommands: [
-            ...state.disabledCommands
-          ]
-        },
-        null,
-        2
-      )
-    );
-  } catch (e) {
-    console.log(
-      "⚠️ Could not save settings:",
-      e.message
-    );
-  }
-}
-
-loadSettings();
-
-// ==========================================
+// =====================================================
 // HELPERS
-// ==========================================
-function ownerJid() {
-  return jidNormalizedUser(
-    `${CONFIG.ownerNumber}@s.whatsapp.net`
-  );
+// =====================================================
+
+function jidNumber(jid = "") {
+  return jid.split("@")[0].split(":")[0];
 }
 
-function normalizeJid(jid) {
-  if (!jid) return "";
-  return jidNormalizedUser(jid);
+function normalizeNumber(number = "") {
+  return number
+    .replace(/\D/g, "")
+    .replace(/^0+/, "");
 }
 
-function isOwner(jid) {
-  return normalizeJid(jid) === ownerJid();
+function isOwner(sender) {
+  const senderNumber = normalizeNumber(jidNumber(sender));
+  const ownerNumber = normalizeNumber(global.ownerNumber);
+
+  return senderNumber === ownerNumber;
 }
 
-function getText(msg) {
+function isGroup(jid = "") {
+  return jid.endsWith("@g.us");
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function getWarnKey(group, user) {
+  return `${group}:${user}`;
+}
+
+function getWarnings(group, user) {
+  return warnings.get(getWarnKey(group, user)) || 0;
+}
+
+function setWarnings(group, user, amount) {
+  warnings.set(getWarnKey(group, user), amount);
+}
+
+function saveMessage(msg) {
+  try {
+    if (!msg || !msg.key || !msg.key.id) return;
+
+    messageCache.set(msg.key.id, msg);
+
+    if (messageCache.size > MAX_CACHE) {
+      const firstKey = messageCache.keys().next().value;
+      messageCache.delete(firstKey);
+    }
+  } catch (e) {
+    console.log("Cache error:", e.message);
+  }
+}
+
+function getMessageText(message) {
+  if (!message) return "";
+
   return (
-    msg?.message?.conversation ||
-    msg?.message?.extendedTextMessage?.text ||
-    msg?.message?.imageMessage?.caption ||
-    msg?.message?.videoMessage?.caption ||
+    message.conversation ||
+    message.extendedTextMessage?.text ||
+    message.imageMessage?.caption ||
+    message.videoMessage?.caption ||
+    message.documentMessage?.caption ||
+    message.buttonsResponseMessage?.selectedButtonId ||
+    message.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    message.templateButtonReplyMessage?.selectedId ||
     ""
-  ).trim();
-}
-
-function getTarget(msg) {
-  const ctx =
-    msg?.message?.extendedTextMessage?.contextInfo;
-
-  return normalizeJid(
-    ctx?.mentionedJid?.[0] ||
-    ctx?.participant
   );
 }
 
-function addCache(msg) {
-  if (!msg?.key?.id) return;
+function getMessageType(message) {
+  if (!message) return "";
 
-  state.cache.set(msg.key.id, msg);
+  if (message.conversation) return "text";
+  if (message.extendedTextMessage) return "text";
+  if (message.imageMessage) return "image";
+  if (message.videoMessage) return "video";
+  if (message.stickerMessage) return "sticker";
+  if (message.audioMessage) return "audio";
+  if (message.documentMessage) return "document";
 
-  if (state.cache.size > state.cacheLimit) {
-    const first =
-      state.cache.keys().next().value;
-
-    state.cache.delete(first);
-  }
+  return "";
 }
 
-function uptime() {
-  let seconds = Math.floor(
-    (Date.now() - state.startedAt) / 1000
-  );
-
-  const days = Math.floor(seconds / 86400);
-  seconds %= 86400;
-
-  const hours = Math.floor(seconds / 3600);
-  seconds %= 3600;
-
-  const minutes = Math.floor(seconds / 60);
-  seconds %= 60;
-
-  return `${days}d ${hours}h ${minutes}m ${seconds}s`;
-}
-
-async function sendText(jid, text, quoted) {
-  return conn.sendMessage(
-    jid,
-    { text },
-    quoted ? { quoted } : {}
-  );
-}
-
-// ==========================================
-// MENU
-// ==========================================
-function menu() {
-  const p = CONFIG.prefix;
-
-  return `
-╭━━━〔 🤖 ${CONFIG.botName} 〕━━━╮
-┃ Version : ${CONFIG.version}
-┃ Mode    : ${state.botMode}
-┃ Prefix  : ${p}
-┃ Owner   : ${CONFIG.ownerName}
-╰━━━━━━━━━━━━━━━━━━━━━━╯
-
-👥 GROUP COMMANDS
-
-${p}kick
-${p}promote
-${p}demote
-${p}mute
-${p}unmute
-${p}tagall
-${p}tagadmin
-${p}members
-${p}groupinfo
-${p}invitelink
-${p}revokelink
-${p}setgname
-${p}setgdesc
-${p}antilink
-${p}warn
-${p}warnings
-${p}adminlist
-${p}myrole
-${p}delete
-${p}bangc
-${p}unbangc
-${p}bangcuser
-${p}unbangcuser
-
-🛡️ SECURITY
-
-${p}antidelete
-${p}antiedit
-${p}antispam
-${p}anticall
-${p}ban
-${p}unban
-${p}bancmd
-${p}unbancmd
-${p}block
-${p}unblock
-
-⚙️ AUTOMATION
-
-${p}autoreact
-${p}ownerreact
-${p}autoread
-${p}online
-${p}typing
-${p}recording
-${p}statusseen
-${p}statusreact
-${p}statusreply
-
-👑 OWNER / BOT
-
-${p}alive
-${p}ping
-${p}owner
-${p}botinfo
-${p}mode
-${p}prefix
-${p}clear
-${p}restart
-
-━━━━━━━━━━━━━━━━━━━━━━
-🔥 ${CONFIG.botName}
-Powered by ${CONFIG.ownerName}
-`;
-}
-
-// ==========================================
-// GROUP CONTEXT
-// ==========================================
-async function groupContext(msg) {
-  const jid = msg.key.remoteJid;
-
-  if (!jid?.endsWith("@g.us")) {
-    return null;
-  }
-
-  const metadata =
-    await conn.groupMetadata(jid);
-
-  const admins =
-    metadata.participants
-      .filter(x => x.admin)
-      .map(x => normalizeJid(x.id));
-
-  const me =
-    normalizeJid(conn.user?.id);
-
-  return {
-    metadata,
-    admins,
-
-    isAdmin:
-      admins.includes(
-        normalizeJid(
-          msg.key.participant
-        )
-      ),
-
-    botAdmin:
-      admins.includes(me)
-  };
-}
-
-// ==========================================
-// GROUP PERMISSION
-// ==========================================
-async function requireGroup(
-  msg,
-  admin = false
-) {
-  const g =
-    await groupContext(msg);
-
-  if (!g) {
-    await sendText(
-      msg.key.remoteJid,
-      "❌ Command hii inafanya kazi kwenye group tu.",
-      msg
-    );
-
-    return null;
-  }
-
-  const sender =
-    normalizeJid(
-      msg.key.participant ||
-      msg.key.remoteJid
-    );
-
-  if (
-    admin &&
-    !g.isAdmin &&
-    !isOwner(sender)
-  ) {
-    await sendText(
-      msg.key.remoteJid,
-      "❌ Admin/Owner pekee.",
-      msg
-    );
-
-    return null;
-  }
-
-  if (
-    admin &&
-    !g.botAdmin
-  ) {
-    await sendText(
-      msg.key.remoteJid,
-      "❌ Nifanye Admin kwanza.",
-      msg
-    );
-
-    return null;
-  }
-
-  return g;
-}
-
-// ==========================================
-// COMMAND HANDLER
-// ==========================================
-async function handleCommand(msg) {
-  const jid =
-    msg.key.remoteJid;
-
-  const sender =
-    normalizeJid(
-      msg.key.participant ||
-      jid
-    );
-
-  const owner =
-    isOwner(sender);
-
-  if (
-    state.bannedUsers.has(sender) ||
-    state.bannedGroups.has(jid)
-  ) {
-    return;
-  }
-
-  if (
-    jid.endsWith("@g.us") &&
-    state.bannedGroupUsers
-      .get(jid)
-      ?.has(sender)
-  ) {
-    return;
-  }
-
-  const text =
-    getText(msg);
-
-  if (
-    !text.startsWith(
-      CONFIG.prefix
-    )
-  ) {
-    return;
-  }
-
-  const parts =
+function containsLink(text = "") {
+  return /(https?:\/\/|www\.|chat\.whatsapp\.com\/|t\.me\/|instagram\.com\/|facebook\.com\/)/i.test(
     text
-      .slice(CONFIG.prefix.length)
-      .trim()
-      .split(/\s+/);
+  );
+}
 
-  const command =
-    (parts.shift() || "")
-      .toLowerCase();
+// =====================================================
+// GROUP ADMIN CHECK
+// =====================================================
 
-  const q =
-    parts.join(" ");
-
-  if (!command) return;
-
-  if (
-    state.disabledCommands.has(
-      command
-    ) &&
-    !owner
-  ) {
-    return sendText(
-      jid,
-      `🔕 ${CONFIG.prefix}${command} imezimwa na Owner.`,
-      msg
-    );
+async function getGroupInfo(groupJid) {
+  try {
+    return await sock.groupMetadata(groupJid);
+  } catch (e) {
+    return null;
   }
+}
 
-  if (
-    state.botMode === "Private" &&
-    !owner
-  ) {
+function findParticipant(metadata, jid) {
+  if (!metadata || !metadata.participants) return null;
+
+  const number = jidNumber(jid);
+
+  return metadata.participants.find(p => {
+    return jidNumber(p.id) === number;
+  });
+}
+
+async function isAdmin(groupJid, userJid) {
+  const metadata = await getGroupInfo(groupJid);
+  if (!metadata) return false;
+
+  const participant = findParticipant(metadata, userJid);
+
+  return !!(
+    participant &&
+    (participant.admin === "admin" || participant.admin === "superadmin")
+  );
+}
+
+async function isBotAdmin(groupJid) {
+  if (!sock?.user?.id) return false;
+
+  return await isAdmin(groupJid, sock.user.id);
+}
+
+// =====================================================
+// SEND HELPERS
+// =====================================================
+
+async function sendText(jid, text, quoted = null) {
+  try {
+    return await sock.sendMessage(
+      jid,
+      { text },
+      quoted ? { quoted } : {}
+    );
+  } catch (e) {
+    console.log("Send error:", e.message);
+  }
+}
+
+async function react(msg, emoji) {
+  try {
+    await sock.sendMessage(msg.key.remoteJid, {
+      react: {
+        text: emoji,
+        key: msg.key
+      }
+    });
+  } catch {}
+}
+
+// =====================================================
+// PAIRING
+// =====================================================
+
+async function requestPairingCode() {
+  if (!sock) return;
+  if (pairingRequested) return;
+  if (!sock.authState) return;
+
+  if (sock.authState.creds?.registered) {
     return;
   }
 
-  // ========================================
-  // ANTI SPAM
-  // ========================================
-  if (
-    state.antiSpam &&
-    jid.endsWith("@g.us")
-  ) {
-    const key =
-      `spam:${jid}:${sender}`;
+  pairingRequested = true;
 
-    const now =
-      Date.now();
+  try {
+    console.log("");
+    console.log("==============================================");
+    console.log("       🔥 LUQMAN MD PAIRING CODE");
+    console.log("==============================================");
+    console.log("");
 
-    const old =
-      state[key] || [];
+    const phone = normalizeNumber(global.ownerNumber);
 
-    state[key] =
-      old.filter(
-        t => now - t < 8000
-      );
+    if (!phone) {
+      throw new Error("Owner phone number is invalid.");
+    }
 
-    state[key].push(now);
+    await delay(2500);
+
+    const code = await sock.requestPairingCode(phone);
+
+    console.log("");
+    console.log(`🔥 PAIRING CODE: ${code}`);
+    console.log("");
+    console.log(
+      "WhatsApp > Linked Devices > Link a device > Link with phone number"
+    );
+    console.log("");
+
+  } catch (error) {
+    pairingRequested = false;
+
+    console.log("");
+    console.log("❌ Pairing code error:", error?.message || error);
+    console.log("");
+
+    // Don't immediately spam WhatsApp with pairing requests.
+    await delay(10000);
 
     if (
-      state[key].length > 8
+      sock &&
+      sock.authState &&
+      !sock.authState.creds?.registered &&
+      !shuttingDown
     ) {
-      return;
+      requestPairingCode().catch(() => {});
+    }
+  }
+}
+
+// =====================================================
+// CONNECTION
+// =====================================================
+
+async function startLuqmanBot() {
+  if (shuttingDown) return;
+
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+
+    let version;
+
+    try {
+      const latest = await fetchLatestBaileysVersion();
+      version = latest.version;
+
+      console.log(
+        `📡 WhatsApp Web version: ${version.join(".")}`
+      );
+    } catch (e) {
+      console.log(
+        "⚠️ Could not fetch latest WhatsApp version. Using Baileys default."
+      );
+    }
+
+    const options = {
+      auth: state,
+      logger,
+
+      // Use the library's canonical browser identity.
+      browser: Browsers.ubuntu("Chrome"),
+
+      printQRInTerminal: false,
+
+      markOnlineOnConnect: false,
+
+      syncFullHistory: false,
+
+      generateHighQualityLinkPreview: false,
+
+      connectTimeoutMs: 60000,
+
+      defaultQueryTimeoutMs: 60000,
+
+      keepAliveIntervalMs: 25000
+    };
+
+    if (version) {
+      options.version = version;
+    }
+
+    sock = makeWASocket(options);
+
+    // IMPORTANT:
+    // expose auth state for pairing helper
+    sock.authState = {
+      creds: state.creds
+    };
+
+    // =================================================
+    // SAVE SESSION
+    // =================================================
+
+    sock.ev.on("creds.update", saveCreds);
+
+    // =================================================
+    // CONNECTION UPDATE
+    // =================================================
+
+    sock.ev.on("connection.update", async update => {
+      const {
+        connection,
+        lastDisconnect,
+        qr
+      } = update;
+
+      if (qr) {
+        console.log("📱 QR received, but LUQMAN MD uses pairing code.");
+      }
+
+      if (connection === "connecting") {
+        console.log("🔄 Connecting to WhatsApp...");
+      }
+
+      if (connection === "open") {
+        pairingRequested = true;
+
+        console.log("");
+        console.log("==============================================");
+        console.log("        ✅ LUQMAN MD CONNECTED");
+        console.log("==============================================");
+        console.log("");
+
+        if (sock.user) {
+          console.log(
+            `👤 Number: ${jidNumber(sock.user.id)}`
+          );
+        }
+
+        console.log(`🤖 Bot: ${global.botName}`);
+        console.log(`👑 Owner: ${global.ownerName}`);
+        console.log("");
+      }
+
+      if (connection === "close") {
+        const statusCode =
+          lastDisconnect?.error?.output?.statusCode;
+
+        const errorMessage =
+          lastDisconnect?.error?.message ||
+          "Connection closed";
+
+        console.log("");
+        console.log("==============================================");
+        console.log("        ⚠️ CONNECTION CLOSED");
+        console.log("==============================================");
+        console.log(`Code: ${statusCode || "unknown"}`);
+        console.log(`Reason: ${errorMessage}`);
+        console.log("");
+
+        // Logged out
+        if (statusCode === DisconnectReason.loggedOut) {
+          console.log(
+            "❌ WhatsApp logged out. Delete auth_session and pair again."
+          );
+          return;
+        }
+
+        // Bad session
+        if (statusCode === 401) {
+          console.log(
+            "❌ Authentication failed. The session is invalid."
+          );
+          return;
+        }
+
+        // 405 is handled carefully.
+        // Do not create endless pairing attempts.
+        if (statusCode === 405) {
+          console.log("");
+          console.log("⚠️ WhatsApp rejected the connection (405).");
+          console.log(
+            "⚠️ LUQMAN MD will not spam reconnect attempts."
+          );
+          console.log("");
+          return;
+        }
+
+        if (shuttingDown) return;
+
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+        }
+
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+
+          if (!shuttingDown) {
+            pairingRequested = false;
+            startLuqmanBot().catch(err => {
+              console.log(
+                "❌ Restart error:",
+                err.message
+              );
+            });
+          }
+        }, 7000);
+
+        console.log("🔄 Reconnecting in 7 seconds...");
+      }
+    });
+
+    // =================================================
+    // REQUEST PAIRING AFTER SOCKET IS READY
+    // =================================================
+
+    if (!state.creds.registered) {
+      console.log("");
+      console.log("📲 No WhatsApp session found.");
+      console.log("📲 Pairing code will be requested...");
+      console.log("");
+
+      // Wait until connection starts instead of requesting
+      // immediately after makeWASocket().
+      const waitForConnection = setInterval(() => {
+        if (shuttingDown) {
+          clearInterval(waitForConnection);
+          return;
+        }
+
+        if (
+          sock &&
+          sock.ws &&
+          sock.ws.isOpen
+        ) {
+          clearInterval(waitForConnection);
+
+          requestPairingCode().catch(err => {
+            console.log(
+              "❌ Pairing request failed:",
+              err.message
+            );
+          });
+        }
+      }, 1000);
+
+      // Safety fallback
+      setTimeout(() => {
+        clearInterval(waitForConnection);
+
+        if (
+          !shuttingDown &&
+          sock &&
+          !state.creds.registered &&
+          !pairingRequested
+        ) {
+          requestPairingCode().catch(() => {});
+        }
+      }, 8000);
+    }
+
+    // =================================================
+    // MESSAGES
+    // =================================================
+
+    sock.ev.on("messages.upsert", async ({ messages }) => {
+      try {
+        const msg = messages?.[0];
+
+        if (!msg) return;
+        if (!msg.message) return;
+        if (msg.key?.remoteJid === "status@broadcast") return;
+
+        saveMessage(msg);
+
+        await handleMessage(msg);
+      } catch (error) {
+        console.log(
+          "Message handler error:",
+          error.message
+        );
+      }
+    });
+
+  } catch (error) {
+    console.log("");
+    console.log("❌ STARTUP ERROR:", error.message);
+    console.log("");
+
+    if (!shuttingDown) {
+      setTimeout(() => {
+        startLuqmanBot().catch(() => {});
+      }, 10000);
+    }
+  }
+}
+
+// =====================================================
+// MESSAGE HANDLER
+// =====================================================
+
+async function handleMessage(msg) {
+  const jid = msg.key.remoteJid;
+
+  if (!jid) return;
+
+  const sender =
+    msg.key.participant ||
+    msg.key.remoteJid;
+
+  const text = getMessageText(msg.message).trim();
+
+  const type = getMessageType(msg.message);
+
+  // ================================================
+  // ANTI STICKER
+  // ================================================
+
+  if (
+    isGroup(jid) &&
+    type === "sticker" &&
+    antiStickerGroups.has(jid)
+  ) {
+    const botAdmin = await isBotAdmin(jid);
+
+    if (botAdmin && !isOwner(sender)) {
+      try {
+        await sock.sendMessage(jid, {
+          delete: msg.key
+        });
+
+        const count = getWarnings(jid, sender) + 1;
+        setWarnings(jid, sender, count);
+
+        await sendText(
+          jid,
+          `⚠️ @${jidNumber(sender)} sticker haziruhusiwi.\n\nWarning: ${count}/3`,
+          {
+            mentions: [sender]
+          }
+        );
+
+        if (count >= 3) {
+          const admin = await isAdmin(jid, sender);
+
+          if (!admin) {
+            await sock.groupParticipantsUpdate(
+              jid,
+              [sender],
+              "remove"
+            );
+
+            setWarnings(jid, sender, 0);
+
+            await sendText(
+              jid,
+              `🚫 @${jidNumber(sender)} ameondolewa baada ya kufikisha warnings 3.`,
+              {
+                mentions: [sender]
+              }
+            );
+          }
+        }
+      } catch (e) {
+        console.log(
+          "Anti-sticker error:",
+          e.message
+        );
+      }
+    }
+
+    return;
+  }
+
+  // ================================================
+  // EMPTY / NON COMMAND
+  // ================================================
+
+  if (!text) return;
+
+  // ================================================
+  // ANTI LINK
+  // ================================================
+
+  if (
+    isGroup(jid) &&
+    antiLinkGroups.has(jid) &&
+    containsLink(text) &&
+    !isOwner(sender)
+  ) {
+    const botAdmin = await isBotAdmin(jid);
+
+    if (botAdmin) {
+      const senderAdmin = await isAdmin(jid, sender);
+
+      if (!senderAdmin) {
+        try {
+          await sock.sendMessage(jid, {
+            delete: msg.key
+          });
+
+          const count = getWarnings(jid, sender) + 1;
+          setWarnings(jid, sender, count);
+
+          await sendText(
+            jid,
+            `🚫 LINK IMEZUIWA!\n\n@${jidNumber(sender)}\n⚠️ Warning: ${count}/3`,
+            {
+              mentions: [sender]
+            }
+          );
+
+          if (count >= 3) {
+            await sock.groupParticipantsUpdate(
+              jid,
+              [sender],
+              "remove"
+            );
+
+            setWarnings(jid, sender, 0);
+
+            await sendText(
+              jid,
+              `👢 @${jidNumber(sender)} ameondolewa kwa kufikisha warnings 3.`,
+              {
+                mentions: [sender]
+              }
+            );
+          }
+
+          return;
+        } catch (e) {
+          console.log(
+            "Anti-link error:",
+            e.message
+          );
+        }
+      }
     }
   }
 
-  // ========================================
-  // COMMANDS
-  // ========================================
-  switch (command) {
+  // ================================================
+  // PREFIX
+  // ================================================
 
-    // ======================================
-    // MENU
-    // ======================================
-    case "menu":
-      return sendText(
+  if (!text.startsWith(global.prefix)) return;
+
+  const body = text.slice(global.prefix.length).trim();
+
+  if (!body) return;
+
+  const args = body.split(/\s+/);
+  const command = args.shift().toLowerCase();
+
+  // ================================================
+  // GROUP ADMIN HELPER
+  // ================================================
+
+  const groupCommand = async () => {
+    if (!isGroup(jid)) {
+      await sendText(
         jid,
-        menu(),
-        msg
+        "❌ Command hii inatumika kwenye group tu."
       );
+      return false;
+    }
 
-    // ======================================
-    // PING
-    // ======================================
-    case "ping": {
-      const start =
-        Date.now();
+    const admin = await isAdmin(jid, sender);
+
+    if (!admin && !isOwner(sender)) {
+      await sendText(
+        jid,
+        "❌ Admin only."
+      );
+      return false;
+    }
+
+    return true;
+  };
+
+  // ================================================
+  // MENU
+  // ================================================
+
+  if (command === "menu" || command === "help") {
+    const menu = `
+╭━━━〔 🔥 ${global.botName} 〕━━━╮
+┃
+┃ 👑 Owner: ${global.ownerName}
+┃ ⚡ Prefix: ${global.prefix}
+┃
+┣━━〔 🤖 GENERAL 〕━━
+┃ ${global.prefix}menu
+┃ ${global.prefix}alive
+┃ ${global.prefix}ping
+┃ ${global.prefix}owner
+┃ ${global.prefix}id
+┃
+┣━━〔 👥 GROUP 〕━━
+┃ ${global.prefix}tagall
+┃ ${global.prefix}hidetag
+┃ ${global.prefix}admins
+┃ ${global.prefix}ginfo
+┃ ${global.prefix}linkgc
+┃ ${global.prefix}kick
+┃ ${global.prefix}add
+┃ ${global.prefix}promote
+┃ ${global.prefix}demote
+┃
+┣━━〔 🛡️ SECURITY 〕━━
+┃ ${global.prefix}antilink on/off
+┃ ${global.prefix}antisticker on/off
+┃ ${global.prefix}warn
+┃ ${global.prefix}warnings
+┃ ${global.prefix}unwarn
+┃
+┣━━〔 🔧 TOOLS 〕━━
+┃ ${global.prefix}echo
+┃ ${global.prefix}calc
+┃
+╰━━〔 🔥 LUQMAN MD 〕━━╯
+    `.trim();
+
+    await sendText(jid, menu);
+    return;
+  }
+
+  // ================================================
+  // ALIVE
+  // ================================================
+
+  if (command === "alive") {
+    await sendText(
+      jid,
+      `🔥 ${global.botName} is alive!\n\n⚡ Status: Online\n👑 Owner: ${global.ownerName}`
+    );
+    return;
+  }
+
+  // ================================================
+  // PING
+  // ================================================
+
+  if (command === "ping") {
+    const start = Date.now();
+
+    const sent = await sock.sendMessage(jid, {
+      text: "🏓 Testing..."
+    });
+
+    const speed = Date.now() - start;
+
+    await sock.sendMessage(jid, {
+      text: `🏓 Pong!\n⚡ ${speed} ms`,
+      edit: sent.key
+    });
+
+    return;
+  }
+
+  // ================================================
+  // OWNER
+  // ================================================
+
+  if (command === "owner") {
+    await sendText(
+      jid,
+      `👑 OWNER\n\nName: ${global.ownerName}\nNumber: +${global.ownerNumber}`
+    );
+    return;
+  }
+
+  // ================================================
+  // ID
+  // ================================================
+
+  if (command === "id") {
+    await sendText(
+      jid,
+      `🆔 Your ID:\n${sender}`
+    );
+    return;
+  }
+
+  // ================================================
+  // ECHO
+  // ================================================
+
+  if (command === "echo") {
+    if (!args.length) {
+      await sendText(
+        jid,
+        `Usage: ${global.prefix}echo hello`
+      );
+      return;
+    }
+
+    await sendText(
+      jid,
+      args.join(" ")
+    );
+
+    return;
+  }
+
+  // ================================================
+  // CALCULATOR
+  // ================================================
+
+  if (command === "calc" || command === "math") {
+    if (!args.length) {
+      await sendText(
+        jid,
+        `Usage: ${global.prefix}calc 25+25`
+      );
+      return;
+    }
+
+    const expression = args.join(" ");
+
+    // Basic calculator only.
+    if (!/^[0-9+\-*/().%\s]+$/.test(expression)) {
+      await sendText(
+        jid,
+        "❌ Tafadhali tumia namba na operators: + - * / % ( )"
+      );
+      return;
+    }
+
+    try {
+      const result = Function(
+        `"use strict"; return (${expression})`
+      )();
 
       await sendText(
         jid,
-        "🏓 Pinging...",
-        msg
+        `🧮 ${expression} = ${result}`
       );
-
-      return sendText(
+    } catch {
+      await sendText(
         jid,
-        `🏓 Pong!
-
-⚡ Response:
-${Date.now() - start}ms
-
-⏱️ Uptime:
-${uptime()}`,
-        msg
+        "❌ Calculation error."
       );
     }
 
-    // ======================================
-    // ALIVE
-    // ======================================
-    case "alive":
-      return sendText(
+    return;
+  }
+
+  // ================================================
+  // GROUP INFO
+  // ================================================
+
+  if (command === "ginfo") {
+    if (!isGroup(jid)) {
+      await sendText(
         jid,
-        `╭━━〔 🟢 ${CONFIG.botName} 〕━━╮
-┃ Status: ONLINE
-┃ Uptime: ${uptime()}
-┃ Version: ${CONFIG.version}
-┃ Owner: ${CONFIG.ownerName}
-╰━━━━━━━━━━━━━━━━━━╯`,
-        msg
+        "❌ Group only."
       );
-
-    // ======================================
-    // OWNER
-    // ======================================
-    case "owner":
-    case "ownernumber":
-      return sendText(
-        jid,
-        `👑 ${CONFIG.ownerName}
-
-📞 wa.me/${CONFIG.ownerNumber}`,
-        msg
-      );
-
-    // ======================================
-    // BOT INFO
-    // ======================================
-    case "botinfo":
-      return sendText(
-        jid,
-        `🤖 ${CONFIG.botName}
-
-Version: ${CONFIG.version}
-Mode: ${state.botMode}
-Prefix: ${CONFIG.prefix}
-Uptime: ${uptime()}
-Node: ${process.version}`,
-        msg
-      );
-
-    // ======================================
-    // MODE
-    // ======================================
-    case "mode":
-      if (!owner) return;
-
-      state.botMode =
-        q.toLowerCase() === "private"
-          ? "Private"
-          : "Public";
-
-      saveSettings();
-
-      return sendText(
-        jid,
-        `⚙️ Mode: ${state.botMode}`,
-        msg
-      );
-
-    // ======================================
-    // PREFIX
-    // ======================================
-    case "prefix":
-      if (!owner) return;
-
-      if (
-        !q ||
-        q.length > 3 ||
-        /\s/.test(q)
-      ) {
-        return sendText(
-          jid,
-          "⚠️ Mfano: .prefix !",
-          msg
-        );
-      }
-
-      CONFIG.prefix = q;
-
-      return sendText(
-        jid,
-        `✅ Prefix sasa ni: ${CONFIG.prefix}`,
-        msg
-      );
-
-    // ======================================
-    // AUTO REACT
-    // ======================================
-    case "autoreact":
-      if (!owner) return;
-
-      state.autoReact =
-        q.toLowerCase() === "on";
-
-      saveSettings();
-
-      return sendText(
-        jid,
-        `🎭 AutoReact: ${
-          state.autoReact
-            ? "ON"
-            : "OFF"
-        }`,
-        msg
-      );
-
-    // ======================================
-    // OWNER REACT
-    // ======================================
-    case "ownerreact":
-      if (!owner) return;
-
-      state.ownerReact =
-        q.toLowerCase() === "on";
-
-      saveSettings();
-
-      return sendText(
-        jid,
-        `👑 OwnerReact: ${
-          state.ownerReact
-            ? "ON"
-            : "OFF"
-        }`,
-        msg
-      );
-
-    // ======================================
-    // AUTO READ
-    // ======================================
-    case "autoread":
-      if (!owner) return;
-
-      state.autoRead =
-        q.toLowerCase() === "on";
-
-      saveSettings();
-
-      return sendText(
-        jid,
-        `👀 AutoRead: ${
-          state.autoRead
-            ? "ON"
-            : "OFF"
-        }`,
-        msg
-      );
-
-    // ======================================
-    // ONLINE
-    // ======================================
-    case "online":
-      if (!owner) return;
-
-      state.alwaysOnline =
-        q.toLowerCase() === "on";
-
-      saveSettings();
-
-      return sendText(
-        jid,
-        `🟢 Online: ${
-          state.alwaysOnline
-            ? "ON"
-            : "OFF"
-        }`,
-        msg
-      );
-
-    // ======================================
-    // TYPING
-    // ======================================
-    case "typing":
-      if (!owner) return;
-
-      state.typing =
-        q.toLowerCase() === "on";
-
-      saveSettings();
-
-      return sendText(
-        jid,
-        `⌨️ Typing: ${
-          state.typing
-            ? "ON"
-            : "OFF"
-        }`,
-        msg
-      );
-
-    // ======================================
-    // RECORDING
-    // ======================================
-    case "recording":
-      if (!owner) return;
-
-      state.recording =
-        q.toLowerCase() === "on";
-
-      saveSettings();
-
-      return sendText(
-        jid,
-        `🎙️ Recording: ${
-          state.recording
-            ? "ON"
-            : "OFF"
-        }`,
-        msg
-      );
-
-    // ======================================
-    // ANTI DELETE
-    // ======================================
-    case "antidelete":
-      if (!owner) return;
-
-      state.antiDelete =
-        q.toLowerCase() === "on";
-
-      saveSettings();
-
-      return sendText(
-        jid,
-        `🛡️ AntiDelete: ${
-          state.antiDelete
-            ? "ON"
-            : "OFF"
-        }`,
-        msg
-      );
-
-    // ======================================
-    // ANTI EDIT
-    // ======================================
-    case "antiedit":
-      if (!owner) return;
-
-      state.antiEdit =
-        q.toLowerCase() === "on";
-
-      saveSettings();
-
-      return sendText(
-        jid,
-        `📝 AntiEdit: ${
-          state.antiEdit
-            ? "ON"
-            : "OFF"
-        }`,
-        msg
-      );
-
-    // ======================================
-    // ANTI SPAM
-    // ======================================
-    case "antispam":
-      if (!owner) return;
-
-      state.antiSpam =
-        q.toLowerCase() === "on";
-
-      saveSettings();
-
-      return sendText(
-        jid,
-        `⏳ AntiSpam: ${
-          state.antiSpam
-            ? "ON"
-            : "OFF"
-        }`,
-        msg
-      );
-
-    // ======================================
-    // ANTI CALL
-    // ======================================
-    case "anticall":
-      if (!owner) return;
-
-      state.antiCall =
-        q.toLowerCase() === "on";
-
-      saveSettings();
-
-      return sendText(
-        jid,
-        `☎️ AntiCall: ${
-          state.antiCall
-            ? "ON"
-            : "OFF"
-        }`,
-        msg
-      );
-
-    // ======================================
-    // STATUS SEEN
-    // ======================================
-    case "statusseen":
-      if (!owner) return;
-
-      state.statusSeen =
-        q.toLowerCase() === "on";
-
-      saveSettings();
-
-      return sendText(
-        jid,
-        `👁️ StatusSeen: ${
-          state.statusSeen
-            ? "ON"
-            : "OFF"
-        }`,
-        msg
-      );
-
-    // ======================================
-    // STATUS REACT
-    // ======================================
-    case "statusreact":
-      if (!owner) return;
-
-      state.statusReact =
-        q.toLowerCase() === "on";
-
-      saveSettings();
-
-      return sendText(
-        jid,
-        `❤️ StatusReact: ${
-          state.statusReact
-            ? "ON"
-            : "OFF"
-        }`,
-        msg
-      );
-
-    // ======================================
-    // STATUS REPLY
-    // ======================================
-    case "statusreply":
-      if (!owner) return;
-
-      state.statusReply =
-        q.toLowerCase() === "on";
-
-      saveSettings();
-
-      return sendText(
-        jid,
-        `💬 StatusReply: ${
-          state.statusReply
-            ? "ON"
-            : "OFF"
-        }`,
-        msg
-      );
-
-    // ======================================
-    // CLEAR CACHE
-    // ======================================
-    case "clear":
-      if (!owner) return;
-
-      state.cache.clear();
-
-      return sendText(
-        jid,
-        "🧹 Message cache imesafishwa.",
-        msg
-      );
-
-    // ======================================
-    // BAN COMMAND
-    // ======================================
-    case "bancmd":
-      if (!owner) return;
-
-      if (!q) {
-        return sendText(
-          jid,
-          `⚠️ ${CONFIG.prefix}bancmd ping`,
-          msg
-        );
-      }
-
-      state.disabledCommands.add(
-        q
-          .toLowerCase()
-          .replace(
-            CONFIG.prefix,
-            ""
-          )
-      );
-
-      saveSettings();
-
-      return sendText(
-        jid,
-        `🔕 ${q} imezimwa.`,
-        msg
-      );
-
-    // ======================================
-    // UNBAN COMMAND
-    // ======================================
-    case "unbancmd":
-      if (!owner) return;
-
-      if (!q) {
-        return sendText(
-          jid,
-          `⚠️ ${CONFIG.prefix}unbancmd ping`,
-          msg
-        );
-      }
-
-      state.disabledCommands.delete(
-        q
-          .toLowerCase()
-          .replace(
-            CONFIG.prefix,
-            ""
-          )
-      );
-
-      saveSettings();
-
-      return sendText(
-        jid,
-        `🔔 ${q} imewashwa.`,
-        msg
-      );
-
-    // ======================================
-    // GLOBAL BAN
-    // ======================================
-    case "ban": {
-      if (!owner) return;
-
-      const target =
-        getTarget(msg);
-
-      if (!target) {
-        return sendText(
-          jid,
-          "⚠️ Tag au reply user.",
-          msg
-        );
-      }
-
-      state.bannedUsers.add(
-        target
-      );
-
-      saveSettings();
-
-      return sendText(
-        jid,
-        `🚫 @${target.split("@")[0]} amebanwa kutumia bot.`,
-        msg
-      );
+      return;
     }
 
-    // ======================================
-    // GLOBAL UNBAN
-    // ======================================
-    case "unban": {
-      if (!owner) return;
+    const metadata = await getGroupInfo(jid);
 
-      const target =
-        getTarget(msg);
-
-      if (!target) {
-        return sendText(
-          jid,
-          "⚠️ Tag au reply user.",
-          msg
-        );
-      }
-
-      state.bannedUsers.delete(
-        target
-      );
-
-      saveSettings();
-
-      return sendText(
+    if (!metadata) {
+      await sendText(
         jid,
-        `✅ @${target.split("@")[0]} ame-unbanwa.`,
-        msg
+        "❌ Failed to get group information."
       );
+      return;
     }
 
-    // ======================================
-    // ANTI LINK
-    // ======================================
-    case "antilink": {
-      const g =
-        await requireGroup(
-          msg,
-          true
-        );
+    const admins = metadata.participants.filter(
+      p =>
+        p.admin === "admin" ||
+        p.admin === "superadmin"
+    );
 
-      if (!g) return;
+    await sendText(
+      jid,
+      `╭━━〔 GROUP INFO 〕━━╮
+┃
+┃ 📛 Name: ${metadata.subject}
+┃ 👥 Members: ${metadata.participants.length}
+┃ 👑 Admins: ${admins.length}
+┃
+╰━━━━━━━━━━━━━━━━╯`
+    );
 
-      const on =
-        q.toLowerCase() === "on";
+    return;
+  }
 
-      if (on) {
-        state.antiLink.add(jid);
-      } else {
-        state.antiLink.delete(jid);
-      }
+  // ================================================
+  // ADMINS
+  // ================================================
 
-      saveSettings();
-
-      return sendText(
+  if (command === "admins") {
+    if (!isGroup(jid)) {
+      await sendText(
         jid,
-        `🛡️ AntiLink: ${
-          on ? "ON" : "OFF"
-        }`,
-        msg
+        "❌ Group only."
       );
+      return;
     }
 
-    // ======================================
-    // MUTE / UNMUTE
-    // ======================================
-    case "mute":
-    case "unmute": {
-      const g =
-        await requireGroup(
-          msg,
-          true
-        );
+    const metadata = await getGroupInfo(jid);
 
-      if (!g) return;
+    if (!metadata) return;
 
-      await conn.groupSettingUpdate(
-        jid,
-        command === "mute"
-          ? "announcement"
-          : "not_announcement"
-      );
+    const admins = metadata.participants.filter(
+      p =>
+        p.admin === "admin" ||
+        p.admin === "superadmin"
+    );
 
-      return sendText(
-        jid,
-        command === "mute"
-          ? "🔒 Group imefungwa kwa members."
-          : "🔓 Group imefunguliwa.",
-        msg
-      );
+    let output = "👑 GROUP ADMINS\n\n";
+
+    for (const admin of admins) {
+      output += `• @${jidNumber(admin.id)}\n`;
     }
 
-    // ======================================
-    // KICK / PROMOTE / DEMOTE
-    // ======================================
-    case "kick":
-    case "promote":
-    case "demote": {
-      const g =
-        await requireGroup(
-          msg,
-          true
-        );
+    await sendText(jid, output, {
+      mentions: admins.map(a => a.id)
+    });
 
-      if (!g) return;
+    return;
+  }
 
-      const target =
-        getTarget(msg);
+  // ================================================
+  // TAG ALL
+  // ================================================
 
-      if (!target) {
-        return sendText(
-          jid,
-          "⚠️ Tag au reply user.",
-          msg
-        );
-      }
+  if (command === "tagall") {
+    const allowed = await groupCommand();
+    if (!allowed) return;
 
-      await conn.groupParticipantsUpdate(
+    const metadata = await getGroupInfo(jid);
+
+    if (!metadata) return;
+
+    const members = metadata.participants;
+
+    let message =
+      args.length
+        ? args.join(" ") + "\n\n"
+        : "📢 Attention everyone!\n\n";
+
+    const mentions = [];
+
+    for (const member of members) {
+      mentions.push(member.id);
+      message += `@${jidNumber(member.id)} `;
+    }
+
+    await sock.sendMessage(jid, {
+      text: message,
+      mentions
+    });
+
+    return;
+  }
+
+  // ================================================
+  // HIDETAG
+  // ================================================
+
+  if (command === "hidetag") {
+    const allowed = await groupCommand();
+    if (!allowed) return;
+
+    const metadata = await getGroupInfo(jid);
+
+    if (!metadata) return;
+
+    const mentions = metadata.participants.map(
+      p => p.id
+    );
+
+    await sock.sendMessage(jid, {
+      text: args.length
+        ? args.join(" ")
+        : "📢 Attention!",
+      mentions
+    });
+
+    return;
+  }
+
+  // ================================================
+  // KICK
+  // ================================================
+
+  if (command === "kick") {
+    const allowed = await groupCommand();
+    if (!allowed) return;
+
+    const botAdmin = await isBotAdmin(jid);
+
+    if (!botAdmin) {
+      await sendText(
+        jid,
+        "❌ Bot lazima awe admin."
+      );
+      return;
+    }
+
+    let target = null;
+
+    if (msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.length) {
+      target =
+        msg.message.extendedTextMessage.contextInfo
+          .mentionedJid[0];
+    }
+
+    if (!target && msg.message?.extendedTextMessage?.contextInfo?.participant) {
+      target =
+        msg.message.extendedTextMessage.contextInfo
+          .participant;
+    }
+
+    if (!target) {
+      await sendText(
+        jid,
+        `❌ Mention user.\n\n${global.prefix}kick @user`
+      );
+      return;
+    }
+
+    if (isOwner(target)) {
+      await sendText(
+        jid,
+        "❌ Huwezi kumtoa owner."
+      );
+      return;
+    }
+
+    try {
+      await sock.groupParticipantsUpdate(
         jid,
         [target],
-        command === "kick"
-          ? "remove"
-          : command
+        "remove"
       );
 
-      return sendText(
+      await sendText(
         jid,
-        `${
-          command === "kick"
-            ? "🪓"
-            : command === "promote"
-            ? "👑"
-            : "📉"
-        } @${target.split("@")[0]} → ${command}`,
-        msg
-      );
-    }
-
-    // ======================================
-    // TAG ALL
-    // ======================================
-    case "tagall": {
-      const g =
-        await requireGroup(
-          msg,
-          true
-        );
-
-      if (!g) return;
-
-      const mentions =
-        g.metadata.participants
-          .map(x =>
-            normalizeJid(x.id)
-          );
-
-      const lines =
-        mentions
-          .map(
-            x =>
-              `@${x.split("@")[0]}`
-          )
-          .join(" ");
-
-      return conn.sendMessage(
-        jid,
+        `👢 @${jidNumber(target)} removed.`,
         {
-          text:
-            `📢 ${q || "Attention"}\n\n${lines}`,
-          mentions
-        },
-        { quoted: msg }
-      );
-    }
-
-    // ======================================
-    // TAG ADMIN / ADMIN LIST
-    // ======================================
-    case "tagadmin":
-    case "adminlist": {
-      const g =
-        await requireGroup(
-          msg
-        );
-
-      if (!g) return;
-
-      const mentions =
-        g.admins;
-
-      return conn.sendMessage(
-        jid,
-        {
-          text:
-            `👮 ADMINS\n\n${
-              mentions
-                .map(
-                  x =>
-                    `@${x.split("@")[0]}`
-                )
-                .join("\n")
-            }`,
-          mentions
-        },
-        { quoted: msg }
-      );
-    }
-
-    // ======================================
-    // MEMBERS
-    // ======================================
-    case "members": {
-      const g =
-        await requireGroup(
-          msg
-        );
-
-      if (!g) return;
-
-      return sendText(
-        jid,
-        `👥 Members: ${g.metadata.participants.length}`,
-        msg
-      );
-    }
-
-    // ======================================
-    // MY ROLE
-    // ======================================
-    case "myrole": {
-      const g =
-        await requireGroup(
-          msg
-        );
-
-      if (!g) return;
-
-      const role =
-        owner
-          ? "Owner"
-          : g.isAdmin
-          ? "Admin"
-          : "Member";
-
-      return sendText(
-        jid,
-        `👤 Role yako: ${role}`,
-        msg
-      );
-    }
-
-    // ======================================
-    // GROUP INFO
-    // ======================================
-    case "groupinfo": {
-      const g =
-        await requireGroup(
-          msg
-        );
-
-      if (!g) return;
-
-      const creator =
-        g.metadata.owner
-          ? `@${g.metadata.owner.split("@")[0]}`
-          : "Unknown";
-
-      return conn.sendMessage(
-        jid,
-        {
-          text:
-            `ℹ️ GROUP INFO
-
-📝 Name: ${g.metadata.subject}
-👥 Members: ${g.metadata.participants.length}
-👑 Creator: ${creator}
-📋 Description: ${g.metadata.desc || "None"}`,
-
-          mentions:
-            g.metadata.owner
-              ? [
-                  normalizeJid(
-                    g.metadata.owner
-                  )
-                ]
-              : []
-        },
-        { quoted: msg }
-      );
-    }
-
-    // ======================================
-    // INVITE LINK
-    // ======================================
-    case "invitelink": {
-      const g =
-        await requireGroup(
-          msg
-        );
-
-      if (!g) return;
-
-      if (!g.botAdmin) {
-        return sendText(
-          jid,
-          "❌ Bot lazima awe Admin.",
-          msg
-        );
-      }
-
-      const code =
-        await conn.groupInviteCode(
-          jid
-        );
-
-      return sendText(
-        jid,
-        `🔗 https://chat.whatsapp.com/${code}`,
-        msg
-      );
-    }
-
-    // ======================================
-    // REVOKE LINK
-    // ======================================
-    case "revokelink": {
-      const g =
-        await requireGroup(
-          msg,
-          true
-        );
-
-      if (!g) return;
-
-      await conn.groupRevokeInvite(
-        jid
-      );
-
-      return sendText(
-        jid,
-        "♻️ Invite link ime-reset.",
-        msg
-      );
-    }
-
-    // ======================================
-    // GROUP NAME
-    // ======================================
-    case "setgname": {
-      const g =
-        await requireGroup(
-          msg,
-          true
-        );
-
-      if (!g) return;
-
-      if (!q) {
-        return sendText(
-          jid,
-          "⚠️ Andika jina jipya.",
-          msg
-        );
-      }
-
-      await conn.groupUpdateSubject(
-        jid,
-        q
-      );
-
-      return sendText(
-        jid,
-        "✅ Group name updated.",
-        msg
-      );
-    }
-
-    // ======================================
-    // GROUP DESCRIPTION
-    // ======================================
-    case "setgdesc": {
-      const g =
-        await requireGroup(
-          msg,
-          true
-        );
-
-      if (!g) return;
-
-      if (!q) {
-        return sendText(
-          jid,
-          "⚠️ Andika description mpya.",
-          msg
-        );
-      }
-
-      await conn.groupUpdateDescription(
-        jid,
-        q
-      );
-
-      return sendText(
-        jid,
-        "✅ Group description updated.",
-        msg
-      );
-    }
-
-    // ======================================
-    // DELETE
-    // ======================================
-    case "delete": {
-      const g =
-        await requireGroup(
-          msg,
-          true
-        );
-
-      if (!g) return;
-
-      const ctx =
-        msg
-          ?.message
-          ?.extendedTextMessage
-          ?.contextInfo;
-
-      if (!ctx?.stanzaId) {
-        return sendText(
-          jid,
-          "⚠️ Reply message unayotaka kufuta.",
-          msg
-        );
-      }
-
-      return conn.sendMessage(
-        jid,
-        {
-          delete: {
-            remoteJid: jid,
-            fromMe: false,
-            id: ctx.stanzaId,
-            participant:
-              ctx.participant
-          }
+          mentions: [target]
         }
       );
+    } catch (e) {
+      await sendText(
+        jid,
+        `❌ Kick failed: ${e.message}`
+      );
     }
 
-    // ======================================
-    // WARN
-    // ======================================
-    case "warn": {
-      const g =
-        await requireGroup(
-          msg,
-          true
-        );
+    return;
+  }
 
-      if (!g) return;
+  // ================================================
+  // ADD
+  // ================================================
 
-      const target =
-        getTarget(msg);
+  if (command === "add") {
+    const allowed = await groupCommand();
+    if (!allowed) return;
 
-      if (!target) {
-        return sendText(
-          jid,
-          "⚠️ Tag/reply user.",
-          msg
-        );
-      }
+    const botAdmin = await isBotAdmin(jid);
 
-      const key =
-        `${jid}:${target}`;
+    if (!botAdmin) {
+      await sendText(
+        jid,
+        "❌ Bot lazima awe admin."
+      );
+      return;
+    }
 
-      const count =
-        (state.warnings.get(key) || 0) + 1;
+    const number = normalizeNumber(args[0] || "");
 
-      state.warnings.set(
-        key,
-        count
+    if (!number) {
+      await sendText(
+        jid,
+        `Usage: ${global.prefix}add 2557XXXXXXXX`
+      );
+      return;
+    }
+
+    try {
+      await sock.groupParticipantsUpdate(
+        jid,
+        [`${number}@s.whatsapp.net`],
+        "add"
       );
 
-      if (count >= 3) {
-        state.warnings.delete(key);
+      await sendText(
+        jid,
+        `✅ Attempted to add +${number}`
+      );
+    } catch (e) {
+      await sendText(
+        jid,
+        `❌ Add failed: ${e.message}`
+      );
+    }
 
-        if (g.botAdmin) {
-          await conn.groupParticipantsUpdate(
+    return;
+  }
+
+  // ================================================
+  // PROMOTE
+  // ================================================
+
+  if (command === "promote") {
+    const allowed = await groupCommand();
+    if (!allowed) return;
+
+    if (!(await isBotAdmin(jid))) {
+      await sendText(
+        jid,
+        "❌ Bot lazima awe admin."
+      );
+      return;
+    }
+
+    const target =
+      msg.message?.extendedTextMessage?.contextInfo
+        ?.mentionedJid?.[0];
+
+    if (!target) {
+      await sendText(
+        jid,
+        `❌ Mention user.\n${global.prefix}promote @user`
+      );
+      return;
+    }
+
+    try {
+      await sock.groupParticipantsUpdate(
+        jid,
+        [target],
+        "promote"
+      );
+
+      await sendText(
+        jid,
+        `👑 @${jidNumber(target)} amekuwa admin.`,
+        {
+          mentions: [target]
+        }
+      );
+    } catch (e) {
+      await sendText(
+        jid,
+        `❌ Promote failed: ${e.message}`
+      );
+    }
+
+    return;
+  }
+
+  // ================================================
+  // DEMOTE
+  // ================================================
+
+  if (command === "demote") {
+    const allowed = await groupCommand();
+    if (!allowed) return;
+
+    if (!(await isBotAdmin(jid))) {
+      await sendText(
+        jid,
+        "❌ Bot lazima awe admin."
+      );
+      return;
+    }
+
+    const target =
+      msg.message?.extendedTextMessage?.contextInfo
+        ?.mentionedJid?.[0];
+
+    if (!target) {
+      await sendText(
+        jid,
+        `❌ Mention user.\n${global.prefix}demote @user`
+      );
+      return;
+    }
+
+    try {
+      await sock.groupParticipantsUpdate(
+        jid,
+        [target],
+        "demote"
+      );
+
+      await sendText(
+        jid,
+        `⬇️ @${jidNumber(target)} ameondolewa admin.`,
+        {
+          mentions: [target]
+        }
+      );
+    } catch (e) {
+      await sendText(
+        jid,
+        `❌ Demote failed: ${e.message}`
+      );
+    }
+
+    return;
+  }
+
+  // ================================================
+  // LINKGC
+  // ================================================
+
+  if (command === "linkgc") {
+    const allowed = await groupCommand();
+    if (!allowed) return;
+
+    if (!(await isBotAdmin(jid))) {
+      await sendText(
+        jid,
+        "❌ Bot lazima awe admin."
+      );
+      return;
+    }
+
+    try {
+      const code = await sock.groupInviteCode(jid);
+
+      await sendText(
+        jid,
+        `🔗 GROUP LINK\n\nhttps://chat.whatsapp.com/${code}`
+      );
+    } catch (e) {
+      await sendText(
+        jid,
+        `❌ Failed: ${e.message}`
+      );
+    }
+
+    return;
+  }
+
+  // ================================================
+  // ANTILINK
+  // ================================================
+
+  if (command === "antilink") {
+    const allowed = await groupCommand();
+    if (!allowed) return;
+
+    const option = args[0]?.toLowerCase();
+
+    if (option === "on") {
+      antiLinkGroups.add(jid);
+
+      await sendText(
+        jid,
+        "🛡️ Anti-link: ON"
+      );
+      return;
+    }
+
+    if (option === "off") {
+      antiLinkGroups.delete(jid);
+
+      await sendText(
+        jid,
+        "🛡️ Anti-link: OFF"
+      );
+      return;
+    }
+
+    await sendText(
+      jid,
+      `Usage:\n${global.prefix}antilink on\n${global.prefix}antilink off`
+    );
+
+    return;
+  }
+
+  // ================================================
+  // ANTISTICKER
+  // ================================================
+
+  if (command === "antisticker") {
+    const allowed = await groupCommand();
+    if (!allowed) return;
+
+    const option = args[0]?.toLowerCase();
+
+    if (option === "on") {
+      antiStickerGroups.add(jid);
+
+      await sendText(
+        jid,
+        "🛡️ Anti-sticker: ON"
+      );
+      return;
+    }
+
+    if (option === "off") {
+      antiStickerGroups.delete(jid);
+
+      await sendText(
+        jid,
+        "🛡️ Anti-sticker: OFF"
+      );
+      return;
+    }
+
+    await sendText(
+      jid,
+      `Usage:\n${global.prefix}antisticker on\n${global.prefix}antisticker off`
+    );
+
+    return;
+  }
+
+  // ================================================
+  // WARN
+  // ================================================
+
+  if (command === "warn") {
+    const allowed = await groupCommand();
+    if (!allowed) return;
+
+    const target =
+      msg.message?.extendedTextMessage?.contextInfo
+        ?.mentionedJid?.[0];
+
+    if (!target) {
+      await sendText(
+        jid,
+        `❌ Mention user.\n${global.prefix}warn @user`
+      );
+      return;
+    }
+
+    const count = getWarnings(jid, target) + 1;
+
+    setWarnings(jid, target, count);
+
+    await sendText(
+      jid,
+      `⚠️ @${jidNumber(target)}\n\nWarning: ${count}/3`,
+      {
+        mentions: [target]
+      }
+    );
+
+    if (count >= 3) {
+      if (await isBotAdmin(jid)) {
+        if (!isOwner(target)) {
+          await sock.groupParticipantsUpdate(
             jid,
             [target],
             "remove"
           );
-        }
 
-        return sendText(
-          jid,
-          `🚫 @${target.split("@")[0]} amefikisha warnings 3 na ameondolewa.`,
-          msg
-        );
-      }
-
-      return sendText(
-        jid,
-        `⚠️ @${target.split("@")[0]} warning ${count}/3`,
-        msg
-      );
-    }
-
-    // ======================================
-    // WARNINGS
-    // ======================================
-    case "warnings": {
-      const g =
-        await requireGroup(
-          msg
-        );
-
-      if (!g) return;
-
-      const target =
-        getTarget(msg) ||
-        sender;
-
-      const count =
-        state.warnings.get(
-          `${jid}:${target}`
-        ) || 0;
-
-      return sendText(
-        jid,
-        `⚠️ @${target.split("@")[0]} ana warnings ${count}/3`,
-        msg
-      );
-    }
-
-    // ======================================
-    // BAN GROUP
-    // ======================================
-    case "bangc": {
-      if (!owner) return;
-
-      state.bannedGroups.add(
-        jid
-      );
-
-      saveSettings();
-
-      return sendText(
-        jid,
-        "🚫 Group imezuiwa kutumia bot.",
-        msg
-      );
-    }
-
-    // ======================================
-    // UNBAN GROUP
-    // ======================================
-    case "unbangc": {
-      if (!owner) return;
-
-      state.bannedGroups.delete(
-        jid
-      );
-
-      saveSettings();
-
-      return sendText(
-        jid,
-        "✅ Group imefunguliwa kutumia bot.",
-        msg
-      );
-    }
-
-    // ======================================
-    // BAN USER IN GROUP
-    // ======================================
-    case "bangcuser":
-    case "unbangcuser": {
-      const g =
-        await requireGroup(
-          msg,
-          true
-        );
-
-      if (!g) return;
-
-      const target =
-        getTarget(msg);
-
-      if (!target) {
-        return sendText(
-          jid,
-          "⚠️ Tag/reply user.",
-          msg
-        );
-      }
-
-      if (
-        !state.bannedGroupUsers.has(jid)
-      ) {
-        state.bannedGroupUsers.set(
-          jid,
-          new Set()
-        );
-      }
-
-      const set =
-        state.bannedGroupUsers.get(
-          jid
-        );
-
-      if (
-        command === "bangcuser"
-      ) {
-        set.add(target);
-      } else {
-        set.delete(target);
-      }
-
-      return sendText(
-        jid,
-        command === "bangcuser"
-          ? "🚫 User amezuiwa kutumia bot hapa."
-          : "✅ User ameruhusiwa tena.",
-        msg
-      );
-    }
-
-    // ======================================
-    // BLOCK / UNBLOCK
-    // ======================================
-    case "block":
-    case "unblock": {
-      if (!owner) return;
-
-      const target =
-        getTarget(msg);
-
-      if (!target) {
-        return sendText(
-          jid,
-          "⚠️ Tag/reply user.",
-          msg
-        );
-      }
-
-      await conn.updateBlockStatus(
-        target,
-        command
-      );
-
-      return sendText(
-        jid,
-        `✅ ${command}: @${target.split("@")[0]}`,
-        msg
-      );
-    }
-
-    // ======================================
-    // RESTART
-    // ======================================
-    case "restart":
-      if (!owner) return;
-
-      await sendText(
-        jid,
-        "🔄 Restarting LUQMAN MD...",
-        msg
-      );
-
-      process.exit(0);
-
-    default:
-      return;
-  }
-}
-
-// ==========================================
-// MESSAGE HANDLER
-// ==========================================
-async function handleMessage(msg) {
-  try {
-    if (
-      !msg?.message ||
-      msg.key?.remoteJid ===
-        "status@broadcast"
-    ) {
-      return;
-    }
-
-    addCache(msg);
-
-    const jid =
-      msg.key.remoteJid;
-
-    const sender =
-      normalizeJid(
-        msg.key.participant ||
-        jid
-      );
-
-    // ========================================
-    // AUTO READ
-    // ========================================
-    if (state.autoRead) {
-      await conn
-        .readMessages([msg.key])
-        .catch(() => {});
-    }
-
-    // ========================================
-    // ONLINE
-    // ========================================
-    if (state.alwaysOnline) {
-      await conn
-        .sendPresenceUpdate(
-          "available",
-          jid
-        )
-        .catch(() => {});
-    }
-
-    // ========================================
-    // TYPING
-    // ========================================
-    if (state.typing) {
-      await conn
-        .sendPresenceUpdate(
-          "composing",
-          jid
-        )
-        .catch(() => {});
-    }
-
-    // ========================================
-    // RECORDING
-    // ========================================
-    if (state.recording) {
-      await conn
-        .sendPresenceUpdate(
-          "recording",
-          jid
-        )
-        .catch(() => {});
-    }
-
-    // ========================================
-    // AUTO REACT
-    // ========================================
-    if (state.autoReact) {
-      const emojis = [
-        "👍",
-        "🔥",
-        "😎",
-        "✨",
-        "😂",
-        "🙌"
-      ];
-
-      await conn
-        .sendMessage(
-          jid,
-          {
-            react: {
-              text:
-                emojis[
-                  Math.floor(
-                    Math.random() *
-                    emojis.length
-                  )
-                ],
-              key: msg.key
-            }
-          }
-        )
-        .catch(() => {});
-    }
-
-    // ========================================
-    // OWNER REACT
-    // ========================================
-    if (
-      state.ownerReact &&
-      isOwner(sender)
-    ) {
-      await conn
-        .sendMessage(
-          jid,
-          {
-            react: {
-              text: "👑",
-              key: msg.key
-            }
-          }
-        )
-        .catch(() => {});
-    }
-
-    // ========================================
-    // ANTI LINK
-    // ========================================
-    const text =
-      getText(msg)
-        .toLowerCase();
-
-    if (
-      state.antiLink.has(jid) &&
-      jid.endsWith("@g.us") &&
-      /(?:https?:\/\/|www\.|chat\.whatsapp\.com\/)/i.test(
-        text
-      )
-    ) {
-      const g =
-        await groupContext(
-          msg
-        ).catch(() => null);
-
-      if (
-        g &&
-        !g.admins.includes(sender) &&
-        !isOwner(sender)
-      ) {
-        if (g.botAdmin) {
-
-          await conn
-            .sendMessage(
-              jid,
-              {
-                delete: msg.key
-              }
-            )
-            .catch(() => {});
-
-          const key =
-            `${jid}:${sender}`;
-
-          const count =
-            (state.warnings.get(key) || 0) + 1;
-
-          state.warnings.set(
-            key,
-            count
-          );
+          setWarnings(jid, target, 0);
 
           await sendText(
             jid,
-            `🛡️ Link imefutwa.
-
-⚠️ Warning ${count}/3`,
-            msg
-          ).catch(() => {});
-
-          if (count >= 3) {
-            state.warnings.delete(key);
-
-            await conn
-              .groupParticipantsUpdate(
-                jid,
-                [sender],
-                "remove"
-              )
-              .catch(() => {});
-          }
+            `🚫 @${jidNumber(target)} ameondolewa baada ya warnings 3.`,
+            {
+              mentions: [target]
+            }
+          );
         }
       }
     }
 
-    // ========================================
-    // COMMANDS
-    // ========================================
-    await handleCommand(msg);
-
-  } catch (err) {
-    console.log(
-      "❌ Message error:",
-      err?.stack ||
-      err?.message ||
-      err
-    );
+    return;
   }
+
+  // ================================================
+  // WARNINGS
+  // ================================================
+
+  if (command === "warnings") {
+    if (!isGroup(jid)) {
+      await sendText(
+        jid,
+        "❌ Group only."
+      );
+      return;
+    }
+
+    const target =
+      msg.message?.extendedTextMessage?.contextInfo
+        ?.mentionedJid?.[0] ||
+      sender;
+
+    const count = getWarnings(jid, target);
+
+    await sendText(
+      jid,
+      `⚠️ @${jidNumber(target)} ana warnings ${count}/3`,
+      {
+        mentions: [target]
+      }
+    );
+
+    return;
+  }
+
+  // ================================================
+  // UNWARN
+  // ================================================
+
+  if (command === "unwarn") {
+    const allowed = await groupCommand();
+    if (!allowed) return;
+
+    const target =
+      msg.message?.extendedTextMessage?.contextInfo
+        ?.mentionedJid?.[0];
+
+    if (!target) {
+      await sendText(
+        jid,
+        `❌ Mention user.`
+      );
+      return;
+    }
+
+    setWarnings(jid, target, 0);
+
+    await sendText(
+      jid,
+      `✅ Warnings za @${jidNumber(target)} zimefutwa.`,
+      {
+        mentions: [target]
+      }
+    );
+
+    return;
+  }
+
+  // ================================================
+  // UNKNOWN COMMAND
+  // ================================================
+
+  await react(msg, "❓");
 }
 
-// ==========================================
-// START BOT
-// ==========================================
-async function startBot() {
+// =====================================================
+// PROCESS HANDLING
+// =====================================================
 
-  const {
-    state: authState,
-    saveCreds
-  } =
-    await useMultiFileAuthState(
-      CONFIG.authDir
-    );
-
-  conn = makeWASocket({
-    auth: authState,
-
-    logger: P({
-      level: "silent"
-    }),
-
-    printQRInTerminal: false,
-
-    browser: [
-      "LUQMAN MD",
-      "Chrome",
-      "1.0.0"
-    ],
-
-    markOnlineOnConnect: false
-  });
-
-  // ========================================
-  // SAVE CREDENTIALS
-  // ========================================
-  conn.ev.on(
-    "creds.update",
-    saveCreds
+process.on("uncaughtException", error => {
+  console.log(
+    "⚠️ Uncaught Exception:",
+    error.message
   );
+});
 
-  // ========================================
-  // PAIRING CODE
-  // ========================================
-  if (
-    !authState.creds.registered
-  ) {
+process.on("unhandledRejection", error => {
+  console.log(
+    "⚠️ Unhandled Rejection:",
+    error?.message || error
+  );
+});
 
-    const phone =
-      CONFIG.ownerNumber
-        .replace(/\D/g, "");
+process.on("SIGTERM", () => {
+  shuttingDown = true;
 
-    try {
-
-      await delay(1500);
-
-      const code =
-        await conn.requestPairingCode(
-          phone
-        );
-
-      console.log(
-        "\n=============================================="
-      );
-
-      console.log(
-        `🔥 LUQMAN MD PAIRING CODE: ${code}`
-      );
-
-      console.log(
-        "==============================================\n"
-      );
-
-      console.log(
-        "📱 WhatsApp > Linked Devices > Link a device > Link with phone number"
-      );
-
-    } catch (err) {
-
-      console.log(
-        "❌ Pairing code error:",
-        err?.message ||
-        err
-      );
-    }
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
   }
 
-  // ========================================
-  // ANTI CALL
-  // ========================================
-  conn.ev.on(
-    "call",
-    async calls => {
+  console.log("🛑 LUQMAN MD shutting down...");
+  process.exit(0);
+});
 
-      if (!state.antiCall) {
-        return;
-      }
+process.on("SIGINT", () => {
+  shuttingDown = true;
 
-      for (
-        const call of calls
-      ) {
-
-        if (
-          call.status ===
-          "offer"
-        ) {
-
-          await conn
-            .rejectCall(
-              call.id,
-              call.from
-            )
-            .catch(() => {});
-
-          await conn
-            .updateBlockStatus(
-              call.from,
-              "block"
-            )
-            .catch(() => {});
-        }
-      }
-    }
-  );
-
-  // ========================================
-  // CONNECTION UPDATE
-  // ========================================
-  conn.ev.on(
-    "connection.update",
-    async update => {
-
-      const {
-        connection,
-        lastDisconnect
-      } = update;
-
-      // ====================================
-      // CONNECTED
-      // ====================================
-      if (
-        connection === "open"
-      ) {
-
-        reconnecting = false;
-
-        console.log(
-          "\n✅ LUQMAN MD CONNECTED SUCCESSFULLY!"
-        );
-
-        console.log(
-          `👑 Owner: ${CONFIG.ownerName}`
-        );
-
-        console.log(
-          `🤖 Bot: ${CONFIG.botName}`
-        );
-
-        console.log(
-          `⚡ Version: ${CONFIG.version}`
-        );
-      }
-
-      // ====================================
-      // DISCONNECTED
-      // ====================================
-      if (
-        connection === "close"
-      ) {
-
-        const code =
-          new Boom(
-            lastDisconnect?.error
-          )
-            ?.output
-            ?.statusCode;
-
-        console.log(
-          `⚠️ Connection closed. Code: ${
-            code ?? "unknown"
-          }`
-        );
-
-        // ==================================
-        // LOGGED OUT
-        // ==================================
-        if (
-          code ===
-          DisconnectReason.loggedOut
-        ) {
-
-          console.log(
-            "❌ WhatsApp logged out."
-          );
-
-          console.log(
-            "Delete auth_session and pair again."
-          );
-
-          return;
-        }
-
-        // ==================================
-        // RECONNECT
-        // ==================================
-        if (!reconnecting) {
-
-          reconnecting = true;
-
-          console.log(
-            "🔄 Reconnecting in 5 seconds..."
-          );
-
-          setTimeout(
-            () => {
-
-              startBot()
-                .catch(
-                  e => {
-
-                    reconnecting =
-                      false;
-
-                    console.log(
-                      "❌ Restart error:",
-                      e.message
-                    );
-                  }
-                );
-
-            },
-            5000
-          );
-        }
-      }
-    }
-  );
-
-  // ========================================
-  // MESSAGES
-  // ========================================
-  conn.ev.on(
-    "messages.upsert",
-    async update => {
-
-      if (
-        update.type !==
-        "notify"
-      ) {
-        return;
-      }
-
-      for (
-        const msg of
-        update.messages
-      ) {
-
-        await handleMessage(
-          msg
-        );
-      }
-    }
-  );
-}
-
-// ==========================================
-// GLOBAL ERROR HANDLERS
-// ==========================================
-process.on(
-  "uncaughtException",
-  err => {
-
-    console.log(
-      "❌ Uncaught:",
-      err?.stack ||
-      err
-    );
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
   }
-);
 
-process.on(
-  "unhandledRejection",
-  err => {
+  console.log("🛑 LUQMAN MD stopped.");
+  process.exit(0);
+});
 
-    console.log(
-      "❌ Rejection:",
-      err?.stack ||
-      err
-    );
-  }
-);
-
-// ==========================================
+// =====================================================
 // START
-// ==========================================
-console.log(
-  "🚀 Starting LUQMAN MD..."
-);
+// =====================================================
 
-startBot().catch(
-  err => {
+console.log("");
+console.log("==============================================");
+console.log("          🔥 LUQMAN MD STARTING");
+console.log("==============================================");
+console.log("");
 
-    console.error(
-      "❌ STARTUP ERROR:",
-      err?.stack ||
-      err
-    );
-
-    process.exit(1);
-  }
-);
+startLuqmanBot().catch(error => {
+  console.log(
+    "❌ Fatal startup error:",
+    error.message
+  );
+});
