@@ -1,7 +1,7 @@
 {
   "name": "luqman-md",
   "version": "6.0.0",
-  "description": "LUQMAN MD WhatsApp Multi-Device Bot",
+  "description": "LUQMAN MD WhatsApp Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -10,10 +10,7 @@
     "node": "20.x"
   },
   "dependencies": {
-    "@hapi/boom": "10.0.1",
     "@whiskeysockets/baileys": "6.7.18",
-    "pino": "8.21.0"
-  },
-  "author": "LUQMAN SJ",
-  "license": "MIT"
+    "pino": "8.19.0"
+  }
 }
