@@ -1,16 +1,38 @@
+```json
 {
-  "name": "luqman-md",
-  "version": "6.0.0",
-  "description": "LUQMAN MD WhatsApp Bot",
+  "name": "whatsapp-bot-complex",
+  "version": "1.1.0",
+  "description": "WhatsApp bot with Baileys v4.x + admin commands, persistence, websocket API, auto reconnect and more.",
   "main": "index.js",
-  "scripts": {
-    "start": "node index.js"
-  },
   "engines": {
-    "node": "20.x"
+    "node": ">=18 <20"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon --watch index.js --exec node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "6.7.18",
-    "pino": "8.19.0"
-  }
+    "@adiwajshing/baileys": "^4.15.0",
+    "better-sqlite3": "^7.5.0",
+    "dotenv": "^16.4.5",
+    "pino": "^8.18.2",
+    "ws": "^8.17.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "baileys",
+    "socket",
+    "websocket",
+    "persistence",
+    "admin",
+    "command",
+    "sqlite"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
 }
+```
