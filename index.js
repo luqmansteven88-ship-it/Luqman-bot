@@ -1,275 +1,177 @@
+```js
+/* ===========================================================
+ * LUQMAN MD – ENHANCED
+ * =========================================================== */
+
 "use strict";
 
+/* ========== IMPORTS ====================================== */
 const {
   default: makeWASocket,
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
   Browsers,
-  delay
+  delay          // from Baileys
 } = require("@whiskeysockets/baileys");
-
 const P = require("pino");
 const fs = require("fs");
 const path = require("path");
+const { Server } = require("ws");          // websocket API
+const sqlite = require("better-sqlite3");   // persistence
+const dotenv = require("dotenv");           // for .env
+dotenv.config();
 
-// =====================================================
-// LUQMAN MD - CONFIG
-// =====================================================
-
+/* ========== GLOBAL CONFIG =============================== */
 global.ownerNumber = "255678716839";
-global.ownerName = "LUQMAN SJ";
-global.botName = "LUQMAN MD";
-global.prefix = ".";
+global.ownerName   = "LUQMAN SJ";
+global.botName     = "LUQMAN MD";
+global.prefix      = ".";
 
+/* ========== AUTH STATE ==================================== */
 const AUTH_DIR = path.join(__dirname, "auth_session");
+if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true });
 
-if (!fs.existsSync(AUTH_DIR)) {
-  fs.mkdirSync(AUTH_DIR, { recursive: true });
-}
+/* ========== LOGGER ======================================= */
+const logger = P({ level: "silent" });
 
-// =====================================================
-// LOGGER
-// =====================================================
+/* ========== DATABASE ------------------------------------- */
+const db = sqlite(process.env.BOT_DB || "./data/bot.db");
+db.exec(`
+  CREATE TABLE IF NOT EXISTS user_levels (
+    jid TEXT PRIMARY KEY,
+    level INTEGER NOT NULL DEFAULT 0,
+    last_cmd TEXT,
+    lock_until INTEGER DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    jid TEXT,
+    messageId TEXT,
+    author TEXT,
+    content TEXT,
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+const stmUserGet  = db.prepare("SELECT * FROM user_levels WHERE jid = ?");
+const stmUserIns  = db.prepare(`INSERT OR IGNORE INTO user_levels (jid) VALUES (?)`);
+const stmUserUpd  = db.prepare("UPDATE user_levels SET level = ?, last_cmd = ?, lock_until = ? WHERE jid = ?");
+const stmLogIns   = db.prepare("INSERT INTO logs (jid, messageId, author, content) VALUES (?,?,?,?)");
 
-const logger = P({
-  level: "silent"
-});
-
-// =====================================================
-// BOT STATE
-// =====================================================
-
+/* ========== GLOBAL STATE =============================== */
 let sock = null;
 let reconnectTimer = null;
 let pairingRequested = false;
 let shuttingDown = false;
 
-const warnings = new Map();
-const antiLinkGroups = new Set();
+const warnings = new Map();                // in‑memory warnings cache
+const antiLinkGroups   = new Set();
 const antiStickerGroups = new Set();
-const mutedGroups = new Set();
-
+const mutedGroups     = new Set();
 const messageCache = new Map();
-
 const MAX_CACHE = 300;
 
-// =====================================================
-// HELPERS
-// =====================================================
+/* ========== HELPERS ===================================== */
+function jidNumber(jid = "") { return jid.split("@")[0].split(":")[0]; }
+function normalizeNumber(n = "") { return n.replace(/\D/g,'').replace(/^0+/, ''); }
+function isOwner(sender) { return normalizeNumber(jidNumber(sender)) === normalizeNumber(global.ownerNumber); }
+function isGroup(jid = "")   { return jid.endsWith("@g.us"); }
+function sleep(ms) { return new Promise(r=>setTimeout(r,ms)); }
 
-function jidNumber(jid = "") {
-  return jid.split("@")[0].split(":")[0];
-}
+function getWarnKey(g,u){ return `${g}:${u}`; }
+function getWarnings(g,u){ return warnings.get(getWarnKey(g,u)) || 0; }
+function setWarnings(g,u,v){ warnings.set(getWarnKey(g,u), v); }
 
-function normalizeNumber(number = "") {
-  return number
-    .replace(/\D/g, "")
-    .replace(/^0+/, "");
-}
-
-function isOwner(sender) {
-  const senderNumber = normalizeNumber(jidNumber(sender));
-  const ownerNumber = normalizeNumber(global.ownerNumber);
-
-  return senderNumber === ownerNumber;
-}
-
-function isGroup(jid = "") {
-  return jid.endsWith("@g.us");
-}
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function getWarnKey(group, user) {
-  return `${group}:${user}`;
-}
-
-function getWarnings(group, user) {
-  return warnings.get(getWarnKey(group, user)) || 0;
-}
-
-function setWarnings(group, user, amount) {
-  warnings.set(getWarnKey(group, user), amount);
-}
-
-function saveMessage(msg) {
-  try {
-    if (!msg || !msg.key || !msg.key.id) return;
-
-    messageCache.set(msg.key.id, msg);
-
-    if (messageCache.size > MAX_CACHE) {
-      const firstKey = messageCache.keys().next().value;
-      messageCache.delete(firstKey);
-    }
-  } catch (e) {
-    console.log("Cache error:", e.message);
-  }
-}
-
-function getMessageText(message) {
-  if (!message) return "";
-
+function getMessageText(msg){
+  if (!msg) return "";
   return (
-    message.conversation ||
-    message.extendedTextMessage?.text ||
-    message.imageMessage?.caption ||
-    message.videoMessage?.caption ||
-    message.documentMessage?.caption ||
-    message.buttonsResponseMessage?.selectedButtonId ||
-    message.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    message.templateButtonReplyMessage?.selectedId ||
+    msg.message.conversation ||
+    msg.message.extendedTextMessage?.text ||
+    msg.message.imageMessage?.caption ||
+    msg.message.videoMessage?.caption ||
+    msg.message.documentMessage?.caption ||
+    msg.message.buttonsResponseMessage?.selectedButtonId ||
+    msg.message.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    msg.message.templateButtonReplyMessage?.selectedId ||
     ""
   );
 }
-
-function getMessageType(message) {
-  if (!message) return "";
-
-  if (message.conversation) return "text";
-  if (message.extendedTextMessage) return "text";
-  if (message.imageMessage) return "image";
-  if (message.videoMessage) return "video";
-  if (message.stickerMessage) return "sticker";
-  if (message.audioMessage) return "audio";
-  if (message.documentMessage) return "document";
-
+function getMessageType(msg){
+  if (!msg) return "";
+  if (msg.message.conversation) return "text";
+  if (msg.message.extendedTextMessage) return "text";
+  if (msg.message.imageMessage) return "image";
+  if (msg.message.videoMessage) return "video";
+  if (msg.message.stickerMessage) return "sticker";
+  if (msg.message.audioMessage) return "audio";
+  if (msg.message.documentMessage) return "document";
   return "";
 }
+function containsLink(text = ""){ return /https?:\/\/|www\.|chat\.whatsapp\.com\/|t\.me\/|instagram\.com\/|facebook\.com\//i.test(text); }
 
-function containsLink(text = "") {
-  return /(https?:\/\/|www\.|chat\.whatsapp\.com\/|t\.me\/|instagram\.com\/|facebook\.com\/)/i.test(
-    text
-  );
-}
-
-// =====================================================
-// GROUP ADMIN CHECK
-// =====================================================
-
-async function getGroupInfo(groupJid) {
-  try {
-    return await sock.groupMetadata(groupJid);
-  } catch (e) {
-    return null;
-  }
-}
-
-function findParticipant(metadata, jid) {
-  if (!metadata || !metadata.participants) return null;
-
-  const number = jidNumber(jid);
-
-  return metadata.participants.find(p => {
-    return jidNumber(p.id) === number;
-  });
-}
-
-async function isAdmin(groupJid, userJid) {
-  const metadata = await getGroupInfo(groupJid);
-  if (!metadata) return false;
-
-  const participant = findParticipant(metadata, userJid);
-
-  return !!(
-    participant &&
-    (participant.admin === "admin" || participant.admin === "superadmin")
-  );
-}
-
-async function isBotAdmin(groupJid) {
-  if (!sock?.user?.id) return false;
-
-  return await isAdmin(groupJid, sock.user.id);
-}
-
-// =====================================================
-// SEND HELPERS
-// =====================================================
-
-async function sendText(jid, text, quoted = null) {
-  try {
-    return await sock.sendMessage(
-      jid,
-      { text },
-      quoted ? { quoted } : {}
-    );
-  } catch (e) {
-    console.log("Send error:", e.message);
-  }
-}
-
-async function react(msg, emoji) {
-  try {
-    await sock.sendMessage(msg.key.remoteJid, {
-      react: {
-        text: emoji,
-        key: msg.key
+/* ========== WS API ------------------------------------- */
+const wss = new Server({ port: process.env.BOT_WSPORT || 8080 });
+wss.on('connection', ws=>{
+  ws.on('message', msg=>{
+    // only local API – simple JSON payload
+    try{
+      const { cmd, payload } = JSON.parse(msg);
+      switch(cmd){
+        case "status":
+          ws.send(JSON.stringify({ status:"OK", users: Array.from(wss.clients).length }));
+          break;
+        case "restart":
+          reinitializeBot();
+          ws.send(JSON.stringify({ status:"RESTARTED" }));
+          break;
+        case "broadcast":
+          if(payload.text){
+             broadcast(payload.text);
+          }
+          break;
+        default:
+          ws.send(JSON.stringify({ err:"unknown cmd" }));
       }
-    });
-  } catch {}
+    }catch(e){
+      ws.send(JSON.stringify({err:e.message}));
+    }
+  });
+});
+
+/* ========== RECONNECT LOGIC =========================== */
+async function reinitializeBot(){
+  if(sock) sock.disconnect();
+  connect();
 }
 
-// =====================================================
-// PAIRING
-// =====================================================
-
-async function requestPairingCode() {
-  if (!sock) return;
-  if (pairingRequested) return;
-  if (!sock.authState) return;
-
-  if (sock.authState.creds?.registered) {
-    return;
-  }
-
+/* ========== PAIRING CODE -------------------------------- */
+async function requestPairingCode(){
+  if(!sock || pairingRequested || !sock.authState) return;
+  if(sock.authState.creds?.registered) return;
   pairingRequested = true;
-
-  try {
-    console.log("");
-    console.log("==============================================");
-    console.log("       🔥 LUQMAN MD PAIRING CODE");
-    console.log("==============================================");
-    console.log("");
-
-    const phone = normalizeNumber(global.ownerNumber);
-
-    if (!phone) {
-      throw new Error("Owner phone number is invalid.");
-    }
-
+  const phone = normalizeNumber(global.ownerNumber.replace(/[^\d]/g,""));
+  try{
     await delay(2500);
-
     const code = await sock.requestPairingCode(phone);
-
-    console.log("");
-    console.log(`🔥 PAIRING CODE: ${code}`);
-    console.log("");
-    console.log(
-      "WhatsApp > Linked Devices > Link a device > Link with phone number"
-    );
-    console.log("");
-
-  } catch (error) {
+    console.log("\n==== PAIRING CODE ====\n"+code+"\n=====================\n");
+  }catch(e){
+    console.log("Pair```js
+  } catch (e) {
     pairingRequested = false;
-
+    console.log("\n❌ Pairing code error:", e?.message || e);
     console.log("");
-    console.log("❌ Pairing code error:", error?.message || error);
-    console.log("");
-
-    // Don't immediately spam WhatsApp with pairing requests.
+    // Don't spam WhatsApp with immediate re‑tries.
     await delay(10000);
-
-    if (
-      sock &&
-      sock.authState &&
-      !sock.authState.creds?.registered &&
-      !shuttingDown
-    ) {
+    if (sock && !sock.authState.creds?.registered && !shuttingDown) {
       requestPairingCode().catch(() => {});
+    }
+  }
+}
+``````js
+function broadcast(text){
+  for (const client of wss.clients){
+    if(client.readyState === 1){
+      client.send(JSON.stringify({ type:"broadcast", text }));
     }
   }
 }
@@ -289,35 +191,21 @@ async function startLuqmanBot() {
     try {
       const latest = await fetchLatestBaileysVersion();
       version = latest.version;
-
-      console.log(
-        `📡 WhatsApp Web version: ${version.join(".")}`
-      );
+      console.log(`📡 WhatsApp Web version: ${version.join(".")}`);
     } catch (e) {
-      console.log(
-        "⚠️ Could not fetch latest WhatsApp version. Using Baileys default."
-      );
+      console.log("⚠️ Could not fetch latest WhatsApp version. Using Baileys default.");
     }
 
     const options = {
       auth: state,
       logger,
-
-      // Use the library's canonical browser identity.
       browser: Browsers.ubuntu("Chrome"),
-
       printQRInTerminal: false,
-
       markOnlineOnConnect: false,
-
       syncFullHistory: false,
-
       generateHighQualityLinkPreview: false,
-
       connectTimeoutMs: 60000,
-
       defaultQueryTimeoutMs: 60000,
-
       keepAliveIntervalMs: 25000
     };
 
@@ -326,29 +214,12 @@ async function startLuqmanBot() {
     }
 
     sock = makeWASocket(options);
-
-    // IMPORTANT:
-    // expose auth state for pairing helper
-    sock.authState = {
-      creds: state.creds
-    };
-
-    // =================================================
-    // SAVE SESSION
-    // =================================================
+    sock.authState = { creds: state.creds };
 
     sock.ev.on("creds.update", saveCreds);
 
-    // =================================================
-    // CONNECTION UPDATE
-    // =================================================
-
     sock.ev.on("connection.update", async update => {
-      const {
-        connection,
-        lastDisconnect,
-        qr
-      } = update;
+      const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
         console.log("📱 QR received, but LUQMAN MD uses pairing code.");
@@ -368,9 +239,7 @@ async function startLuqmanBot() {
         console.log("");
 
         if (sock.user) {
-          console.log(
-            `👤 Number: ${jidNumber(sock.user.id)}`
-          );
+          console.log(`👤 Number: ${jidNumber(sock.user.id)}`);
         }
 
         console.log(`🤖 Bot: ${global.botName}`);
@@ -379,22 +248,17 @@ async function startLuqmanBot() {
       }
 
       if (connection === "close") {
-        const statusCode =
-          lastDisconnect?.error?.output?.statusCode;
-
-        const errorMessage =
-          lastDisconnect?.error?.message ||
-          "Connection closed";
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        const errorMessage = lastDisconnect?.error?.message || "Connection closed";
 
         console.log("");
-        console.log("==============================================");
-        console.log("        ⚠️ CONNECTION CLOSED");
+        console.log("=============================================="```js
+console.log("        ⚠️ CONNECTION CLOSED");
         console.log("==============================================");
         console.log(`Code: ${statusCode || "unknown"}`);
         console.log(`Reason: ${errorMessage}`);
         console.log("");
 
-        // Logged out
         if (statusCode === DisconnectReason.loggedOut) {
           console.log(
             "❌ WhatsApp logged out. Delete auth_session and pair again."
@@ -402,42 +266,29 @@ async function startLuqmanBot() {
           return;
         }
 
-        // Bad session
         if (statusCode === 401) {
-          console.log(
-            "❌ Authentication failed. The session is invalid."
-          );
+          console.log("❌ Authentication failed. The session is invalid.");
           return;
         }
 
-        // 405 is handled carefully.
-        // Do not create endless pairing attempts.
         if (statusCode === 405) {
           console.log("");
           console.log("⚠️ WhatsApp rejected the connection (405).");
-          console.log(
-            "⚠️ LUQMAN MD will not spam reconnect attempts."
-          );
+          console.log("⚠️ LUQMAN MD will not spam reconnect attempts.");
           console.log("");
           return;
         }
 
         if (shuttingDown) return;
 
-        if (reconnectTimer) {
-          clearTimeout(reconnectTimer);
-        }
+        if (reconnectTimer) clearTimeout(reconnectTimer);
 
         reconnectTimer = setTimeout(() => {
           reconnectTimer = null;
-
           if (!shuttingDown) {
             pairingRequested = false;
             startLuqmanBot().catch(err => {
-              console.log(
-                "❌ Restart error:",
-                err.message
-              );
+              console.log("❌ Restart error:", err.message);
             });
           }
         }, 7000);
@@ -446,41 +297,26 @@ async function startLuqmanBot() {
       }
     });
 
-    // =================================================
-    // REQUEST PAIRING AFTER SOCKET IS READY
-    // =================================================
-
     if (!state.creds.registered) {
       console.log("");
       console.log("📲 No WhatsApp session found.");
       console.log("📲 Pairing code will be requested...");
       console.log("");
 
-      // Wait until connection starts instead of requesting
-      // immediately after makeWASocket().
       const waitForConnection = setInterval(() => {
         if (shuttingDown) {
           clearInterval(waitForConnection);
           return;
         }
 
-        if (
-          sock &&
-          sock.ws &&
-          sock.ws.isOpen
-        ) {
+        if (sock && sock.ws && sock.ws.isOpen) {
           clearInterval(waitForConnection);
-
           requestPairingCode().catch(err => {
-            console.log(
-              "❌ Pairing request failed:",
-              err.message
-            );
+            console.log("❌ Pairing request failed:", err.message);
           });
         }
       }, 1000);
 
-      // Safety fallback
       setTimeout(() => {
         clearInterval(waitForConnection);
 
@@ -495,10 +331,6 @@ async function startLuqmanBot() {
       }, 8000);
     }
 
-    // =================================================
-    // MESSAGES
-    // =================================================
-
     sock.ev.on("messages.upsert", async ({ messages }) => {
       try {
         const msg = messages?.[0];
@@ -508,13 +340,9 @@ async function startLuqmanBot() {
         if (msg.key?.remoteJid === "status@broadcast") return;
 
         saveMessage(msg);
-
         await handleMessage(msg);
       } catch (error) {
-        console.log(
-          "Message handler error:",
-          error.message
-        );
+        console.log("Message handler error:", error.message);
       }
     });
 
@@ -540,13 +368,27 @@ async function handleMessage(msg) {
 
   if (!jid) return;
 
-  const sender =
-    msg.key.participant ||
-    msg.key.remoteJid;
-
+  const sender = msg.key.participant || msg.key.remoteJid;
   const text = getMessageText(msg.message).trim();
-
   const type = getMessageType(msg.message);
+
+  const stmRow = stmUserGet.get(sender);
+
+  if (!stmRow) {
+    stmUserIns.run(sender);
+    stmUserUpd.run(0, new Date().toISOString(), 0, sender);
+  }
+
+  const lockUntil = stmRow?.lock_until || 0;
+  const now = Date.now();
+
+  if (lockUntil > now) {
+    const remaining = Math.ceil((lockUntil - now) / 1000);
+    if (text.startsWith(global.prefix)) {
+      await sendText(jid, `⏳ Bot locked. Try again in ${remaining}s.`);
+    }
+    return;
+  }
 
   // ================================================
   // ANTI STICKER
@@ -561,9 +403,7 @@ async function handleMessage(msg) {
 
     if (botAdmin && !isOwner(sender)) {
       try {
-        await sock.sendMessage(jid, {
-          delete: msg.key
-        });
+        await sock.sendMessage(jid, { delete: msg.key });
 
         const count = getWarnings(jid, sender) + 1;
         setWarnings(jid, sender, count);
@@ -571,37 +411,25 @@ async function handleMessage(msg) {
         await sendText(
           jid,
           `⚠️ @${jidNumber(sender)} sticker haziruhusiwi.\n\nWarning: ${count}/3`,
-          {
-            mentions: [sender]
-          }
+          { mentions: [sender] }
         );
 
         if (count >= 3) {
           const admin = await isAdmin(jid, sender);
 
-          if (!admin) {
-            await sock.groupParticipantsUpdate(
-              jid,
-              [sender],
-              "remove"
-            );
-
+          if (!admin && !isOwner(sender)) {
+            await sock.groupParticipantsUpdate(jid, [sender], "remove");
             setWarnings(jid, sender, 0);
 
             await sendText(
               jid,
               `🚫 @${jidNumber(sender)} ameondolewa baada ya kufikisha warnings 3.`,
-              {
-                mentions: [sender]
-              }
+              { mentions: [sender] }
             );
           }
         }
       } catch (e) {
-        console.log(
-          "Anti-sticker error:",
-          e.message
-        );
+        console.log("Anti-sticker error:", e.message);
       }
     }
 
@@ -631,9 +459,7 @@ async function handleMessage(msg) {
 
       if (!senderAdmin) {
         try {
-          await sock.sendMessage(jid, {
-            delete: msg.key
-          });
+          await sock.sendMessage(jid, { delete: msg.key });
 
           const count = getWarnings(jid, sender) + 1;
           setWarnings(jid, sender, count);
@@ -641,35 +467,23 @@ async function handleMessage(msg) {
           await sendText(
             jid,
             `🚫 LINK IMEZUIWA!\n\n@${jidNumber(sender)}\n⚠️ Warning: ${count}/3`,
-            {
-              mentions: [sender]
-            }
+            { mentions: [sender] }
           );
 
           if (count >= 3) {
-            await sock.groupParticipantsUpdate(
-              jid,
-              [sender],
-              "remove"
-            );
-
+            await sock.groupParticipantsUpdate(jid, [sender], "remove");
             setWarnings(jid, sender, 0);
 
             await sendText(
               jid,
               `👢 @${jidNumber(sender)} ameondolewa kwa kufikisha warnings 3.`,
-              {
-                mentions: [sender]
-              }
+              { mentions: [sender] }
             );
           }
 
           return;
         } catch (e) {
-          console.log(
-            "Anti-link error:",
-            e.message
-          );
+          console.log("Anti-link error:", e.message);
         }
       }
     }
@@ -694,20 +508,14 @@ async function handleMessage(msg) {
 
   const groupCommand = async () => {
     if (!isGroup(jid)) {
-      await sendText(
-        jid,
-        "❌ Command hii inatumika kwenye group tu."
-      );
+      await sendText(jid, "❌ Command hii inatumika kwenye group tu.");
       return false;
     }
 
     const admin = await isAdmin(jid, sender);
 
     if (!admin && !isOwner(sender)) {
-      await sendText(
-        jid,
-        "❌ Admin only."
-      );
+      await sendText(jid, "❌ Admin only.");
       return false;
     }
 
@@ -753,6 +561,9 @@ async function handleMessage(msg) {
 ┣━━〔 🔧 TOOLS 〕━━
 ┃ ${global.prefix}echo
 ┃ ${global.prefix}calc
+┃ ${global.prefix}lock
+┃ ${global.prefix}unlock
+┃ ${global.prefix}stats
 ┃
 ╰━━〔 🔥 LUQMAN MD 〕━━╯
     `.trim();
@@ -780,9 +591,7 @@ async function handleMessage(msg) {
   if (command === "ping") {
     const start = Date.now();
 
-    const sent = await sock.sendMessage(jid, {
-      text: "🏓 Testing..."
-    });
+    const sent = await sock.sendMessage(jid, { text: "🏓 Testing..." });
 
     const speed = Date.now() - start;
 
@@ -811,10 +620,7 @@ async function handleMessage(msg) {
   // ================================================
 
   if (command === "id") {
-    await sendText(
-      jid,
-      `🆔 Your ID:\n${sender}`
-    );
+    await sendText(jid, `🆔 Your ID:\n${sender}`);
     return;
   }
 
@@ -824,18 +630,11 @@ async function handleMessage(msg) {
 
   if (command === "echo") {
     if (!args.length) {
-      await sendText(
-        jid,
-        `Usage: ${global.prefix}echo hello`
-      );
+      await sendText(jid, `Usage: ${global.prefix}echo hello`);
       return;
     }
 
-    await sendText(
-      jid,
-      args.join(" ")
-    );
-
+    await sendText(jid, args.join(" "));
     return;
   }
 
@@ -845,38 +644,22 @@ async function handleMessage(msg) {
 
   if (command === "calc" || command === "math") {
     if (!args.length) {
-      await sendText(
-        jid,
-        `Usage: ${global.prefix}calc 25+25`
-      );
+      await sendText(jid, `Usage: ${global.prefix}calc 25+25`);
       return;
     }
 
     const expression = args.join(" ");
 
-    // Basic calculator only.
     if (!/^[0-9+\-*/().%\s]+$/.test(expression)) {
-      await sendText(
-        jid,
-        "❌ Tafadhali tumia namba na operators: + - * / % ( )"
-      );
+      await sendText(jid, "❌ Tafadhali tumia namba na operators: + - * / % ( )");
       return;
     }
 
     try {
-      const result = Function(
-        `"use strict"; return (${expression})`
-      )();
-
-      await sendText(
-        jid,
-        `🧮 ${expression} = ${result}`
-      );
+      const result = Function(`"use strict"; return (${expression})`)();
+      await sendText(jid, `🧮 ${expression} = ${result}`);
     } catch {
-      await sendText(
-        jid,
-        "❌ Calculation error."
-      );
+      await sendText(jid, "❌ Calculation error.");
     }
 
     return;
@@ -888,27 +671,19 @@ async function handleMessage(msg) {
 
   if (command === "ginfo") {
     if (!isGroup(jid)) {
-      await sendText(
-        jid,
-        "❌ Group only."
-      );
+      await sendText(jid, "❌ Group only.");
       return;
     }
 
     const metadata = await getGroupInfo(jid);
 
     if (!metadata) {
-      await sendText(
-        jid,
-        "❌ Failed to get group information."
-      );
+      await sendText(jid, "❌ Failed to get group information.");
       return;
     }
 
     const admins = metadata.participants.filter(
-      p =>
-        p.admin === "admin" ||
-        p.admin === "superadmin"
+      p => p.admin === "admin" || p.admin === "superadmin"
     );
 
     await sendText(
@@ -921,7 +696,6 @@ async function handleMessage(msg) {
 ┃
 ╰━━━━━━━━━━━━━━━━╯`
     );
-
     return;
   }
 
@@ -931,10 +705,7 @@ async function handleMessage(msg) {
 
   if (command === "admins") {
     if (!isGroup(jid)) {
-      await sendText(
-        jid,
-        "❌ Group only."
-      );
+      await sendText(jid, "❌ Group only.");
       return;
     }
 
@@ -943,9 +714,7 @@ async function handleMessage(msg) {
     if (!metadata) return;
 
     const admins = metadata.participants.filter(
-      p =>
-        p.admin === "admin" ||
-        p.admin === "superadmin"
+      p => p.admin === "admin" || p.admin === "superadmin"
     );
 
     let output = "👑 GROUP ADMINS\n\n";
@@ -954,10 +723,7 @@ async function handleMessage(msg) {
       output += `• @${jidNumber(admin.id)}\n`;
     }
 
-    await sendText(jid, output, {
-      mentions: admins.map(a => a.id)
-    });
-
+    await sendText(jid, output, { mentions: admins.map(a => a.id) });
     return;
   }
 
@@ -975,10 +741,9 @@ async function handleMessage(msg) {
 
     const members = metadata.participants;
 
-    let message =
-      args.length
-        ? args.join(" ") + "\n\n"
-        : "📢 Attention everyone!\n\n";
+    let message = args.length
+      ? args.join(" ") + "\n\n"
+      : "📢 Attention everyone!\n\n";
 
     const mentions = [];
 
@@ -987,11 +752,7 @@ async function handleMessage(msg) {
       message += `@${jidNumber(member.id)} `;
     }
 
-    await sock.sendMessage(jid, {
-      text: message,
-      mentions
-    });
-
+    await sock.sendMessage(jid, { text: message, mentions });
     return;
   }
 
@@ -1007,14 +768,10 @@ async function handleMessage(msg) {
 
     if (!metadata) return;
 
-    const mentions = metadata.participants.map(
-      p => p.id
-    );
+    const mentions = metadata.participants.map(p => p.id);
 
     await sock.sendMessage(jid, {
-      text: args.length
-        ? args.join(" ")
-        : "📢 Attention!",
+      text: args.length ? args.join(" ") : "📢 Attention!",
       mentions
     });
 
@@ -1032,62 +789,38 @@ async function handleMessage(msg) {
     const botAdmin = await isBotAdmin(jid);
 
     if (!botAdmin) {
-      await sendText(
-        jid,
-        "❌ Bot lazima awe admin."
-      );
+      await sendText(jid, "❌ Bot lazima awe admin.");
       return;
     }
 
     let target = null;
 
-    if (msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.length) {
-      target =
-        msg.message.extendedTextMessage.contextInfo
-          .mentionedJid[0];
+    if (
+      msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.length
+    ) {
+      target = msg.message.extendedTextMessage.contextInfo.mentionedJid[0];
     }
 
     if (!target && msg.message?.extendedTextMessage?.contextInfo?.participant) {
-      target =
-        msg.message.extendedTextMessage.contextInfo
-          .participant;
+      target = msg.message.extendedTextMessage.contextInfo.participant;
     }
 
     if (!target) {
-      await sendText(
-        jid,
-        `❌ Mention user.\n\n${global.prefix}kick @user`
-      );
+      await sendText(jid, `❌ Mention user.\n\n${global.prefix}kick @user`);
       return;
     }
 
     if (isOwner(target)) {
-      await sendText(
-        jid,
-        "❌ Huwezi kumtoa owner."
-      );
+      await sendText(jid, "❌ Huwezi kumtoa owner.");
       return;
     }
 
     try {
-      await sock.groupParticipantsUpdate(
-        jid,
-        [target],
-        "remove"
-      );
+      await sock.groupParticipantsUpdate(jid, [target], "remove");
 
-      await sendText(
-        jid,
-        `👢 @${jidNumber(target)} removed.`,
-        {
-          mentions: [target]
-        }
-      );
+      await sendText(jid, `👢 @${jidNumber(target)} removed.`, { mentions: [target] });
     } catch (e) {
-      await sendText(
-        jid,
-        `❌ Kick failed: ${e.message}`
-      );
+      await sendText(jid, `❌ Kick failed: ${e.message}`);
     }
 
     return;
@@ -1104,20 +837,14 @@ async function handleMessage(msg) {
     const botAdmin = await isBotAdmin(jid);
 
     if (!botAdmin) {
-      await sendText(
-        jid,
-        "❌ Bot lazima awe admin."
-      );
+      await sendText(jid, "❌ Bot lazima awe admin.");
       return;
     }
 
     const number = normalizeNumber(args[0] || "");
 
     if (!number) {
-      await sendText(
-        jid,
-        `Usage: ${global.prefix}add 2557XXXXXXXX`
-      );
+      await sendText(jid, `Usage: ${global.prefix}add 2557XXXXXXXX`);
       return;
     }
 
@@ -1128,15 +855,9 @@ async function handleMessage(msg) {
         "add"
       );
 
-      await sendText(
-        jid,
-        `✅ Attempted to add +${number}`
-      );
+      await sendText(jid, `✅ Attempted to add +${number}`);
     } catch (e) {
-      await sendText(
-        jid,
-        `❌ Add failed: ${e.message}`
-      );
+      await sendText(jid, `❌ Add failed: ${e.message}`);
     }
 
     return;
@@ -1151,44 +872,24 @@ async function handleMessage(msg) {
     if (!allowed) return;
 
     if (!(await isBotAdmin(jid))) {
-      await sendText(
-        jid,
-        "❌ Bot lazima awe admin."
-      );
+      await sendText(jid, "❌ Bot lazima awe admin.");
       return;
     }
 
     const target =
-      msg.message?.extendedTextMessage?.contextInfo
-        ?.mentionedJid?.[0];
+      msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
 
     if (!target) {
-      await sendText(
-        jid,
-        `❌ Mention user.\n${global.prefix}promote @user`
-      );
+      await sendText(jid, `❌ Mention user.\n${global.prefix}promote @user`);
       return;
     }
 
     try {
-      await sock.groupParticipantsUpdate(
-        jid,
-        [target],
-        "promote"
-      );
+      await sock.groupParticipantsUpdate(jid, [target], "promote");
 
-      await sendText(
-        jid,
-        `👑 @${jidNumber(target)} amekuwa admin.`,
-        {
-          mentions: [target]
-        }
-      );
+      await sendText(jid, `👑 @${jidNumber(target)} amekuwa admin.`, { mentions: [target] });
     } catch (e) {
-      await sendText(
-        jid,
-        `❌ Promote failed: ${e.message}`
-      );
+      await sendText(jid, `❌ Promote failed: ${e.message}`);
     }
 
     return;
@@ -1203,44 +904,24 @@ async function handleMessage(msg) {
     if (!allowed) return;
 
     if (!(await isBotAdmin(jid))) {
-      await sendText(
-        jid,
-        "❌ Bot lazima awe admin."
-      );
+      await sendText(jid, "❌ Bot lazima awe admin.");
       return;
     }
 
     const target =
-      msg.message?.extendedTextMessage?.contextInfo
-        ?.mentionedJid?.[0];
+      msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
 
     if (!target) {
-      await sendText(
-        jid,
-        `❌ Mention user.\n${global.prefix}demote @user`
-      );
+      await sendText(jid, `❌ Mention user.\n${global.prefix}demote @user`);
       return;
     }
 
     try {
-      await sock.groupParticipantsUpdate(
-        jid,
-        [target],
-        "demote"
-      );
+      await sock.groupParticipantsUpdate(jid, [target], "demote");
 
-      await sendText(
-        jid,
-        `⬇️ @${jidNumber(target)} ameondolewa admin.`,
-        {
-          mentions: [target]
-        }
-      );
+      await sendText(jid, `⬇️ @${jidNumber(target)} ameondolewa admin.`, { mentions: [target] });
     } catch (e) {
-      await sendText(
-        jid,
-        `❌ Demote failed: ${e.message}`
-      );
+      await sendText(jid, `❌ Demote failed: ${e.message}`);
     }
 
     return;
@@ -1255,25 +936,16 @@ async function handleMessage(msg) {
     if (!allowed) return;
 
     if (!(await isBotAdmin(jid))) {
-      await sendText(
-        jid,
-        "❌ Bot lazima awe admin."
-      );
+      await sendText(jid, "❌ Bot lazima awe admin.");
       return;
     }
 
     try {
       const code = await sock.groupInviteCode(jid);
 
-      await sendText(
-        jid,
-        `🔗 GROUP LINK\n\nhttps://chat.whatsapp.com/${code}`
-      );
+      await sendText(jid, `🔗 GROUP LINK\n\nhttps://chat.whatsapp.com/${code}`);
     } catch (e) {
-      await sendText(
-        jid,
-        `❌ Failed: ${e.message}`
-      );
+      await sendText(jid, `❌ Failed: ${e.message}`);
     }
 
     return;
@@ -1291,29 +963,17 @@ async function handleMessage(msg) {
 
     if (option === "on") {
       antiLinkGroups.add(jid);
-
-      await sendText(
-        jid,
-        "🛡️ Anti-link: ON"
-      );
+      await sendText(jid, "🛡️ Anti-link: ON");
       return;
     }
 
     if (option === "off") {
       antiLinkGroups.delete(jid);
-
-      await sendText(
-        jid,
-        "🛡️ Anti-link: OFF"
-      );
+      await sendText(jid, "🛡️ Anti-link: OFF");
       return;
     }
 
-    await sendText(
-      jid,
-      `Usage:\n${global.prefix}antilink on\n${global.prefix}antilink off`
-    );
-
+    await sendText(jid, `Usage:\n${global.prefix}antilink on\n${global.prefix}antilink off`);
     return;
   }
 
@@ -1329,29 +989,17 @@ async function handleMessage(msg) {
 
     if (option === "on") {
       antiStickerGroups.add(jid);
-
-      await sendText(
-        jid,
-        "🛡️ Anti-sticker: ON"
-      );
+      await sendText(jid, "🛡️ Anti-sticker: ON");
       return;
     }
 
     if (option === "off") {
       antiStickerGroups.delete(jid);
-
-      await sendText(
-        jid,
-        "🛡️ Anti-sticker: OFF"
-      );
+      await sendText(jid, "🛡️ Anti-sticker: OFF");
       return;
     }
 
-    await sendText(
-      jid,
-      `Usage:\n${global.prefix}antisticker on\n${global.prefix}antisticker off`
-    );
-
+    await sendText(jid, `Usage:\n${global.prefix}antisticker on\n${global.prefix}antisticker off`);
     return;
   }
 
@@ -1364,14 +1012,10 @@ async function handleMessage(msg) {
     if (!allowed) return;
 
     const target =
-      msg.message?.extendedTextMessage?.contextInfo
-        ?.mentionedJid?.[0];
+      msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
 
     if (!target) {
-      await sendText(
-        jid,
-        `❌ Mention user.\n${global.prefix}warn @user`
-      );
+      await sendText(jid, `❌ Mention user.\n${global.prefix}warn @user`);
       return;
     }
 
@@ -1382,28 +1026,19 @@ async function handleMessage(msg) {
     await sendText(
       jid,
       `⚠️ @${jidNumber(target)}\n\nWarning: ${count}/3`,
-      {
-        mentions: [target]
-      }
+      { mentions: [target] }
     );
 
     if (count >= 3) {
       if (await isBotAdmin(jid)) {
         if (!isOwner(target)) {
-          await sock.groupParticipantsUpdate(
-            jid,
-            [target],
-            "remove"
-          );
-
+          await sock.groupParticipantsUpdate(jid, [target], "remove");
           setWarnings(jid, target, 0);
 
           await sendText(
             jid,
             `🚫 @${jidNumber(target)} ameondolewa baada ya warnings 3.`,
-            {
-              mentions: [target]
-            }
+            { mentions: [target] }
           );
         }
       }
@@ -1418,16 +1053,12 @@ async function handleMessage(msg) {
 
   if (command === "warnings") {
     if (!isGroup(jid)) {
-      await sendText(
-        jid,
-        "❌ Group only."
-      );
+      await sendText(jid, "❌ Group only.");
       return;
     }
 
     const target =
-      msg.message?.extendedTextMessage?.contextInfo
-        ?.mentionedJid?.[0] ||
+      msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] ||
       sender;
 
     const count = getWarnings(jid, target);
@@ -1435,9 +1066,7 @@ async function handleMessage(msg) {
     await sendText(
       jid,
       `⚠️ @${jidNumber(target)} ana warnings ${count}/3`,
-      {
-        mentions: [target]
-      }
+      { mentions: [target] }
     );
 
     return;
@@ -1452,14 +1081,10 @@ async function handleMessage(msg) {
     if (!allowed) return;
 
     const target =
-      msg.message?.extendedTextMessage?.contextInfo
-        ?.mentionedJid?.[0];
+      msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
 
     if (!target) {
-      await sendText(
-        jid,
-        `❌ Mention user.`
-      );
+      await sendText(jid, `❌ Mention user.`);
       return;
     }
 
@@ -1468,11 +1093,55 @@ async function handleMessage(msg) {
     await sendText(
       jid,
       `✅ Warnings za @${jidNumber(target)} zimefutwa.`,
-      {
-        mentions: [target]
-      }
+      { mentions: [target] }
     );
 
+    return;
+  }
+
+  // ================================================
+  // LOCK / UNLOCK (owner only)
+  // ================================================
+
+  if (command === "lock") {
+    if (!isOwner(sender)) {
+      await sendText(jid, "❌ Owner only.");
+      return;
+    }
+
+    const duration = parseInt(args[0] || "60");
+    const lockUntil = Date.now() + duration * 1000;
+
+    stmUserUpd.run(0, new Date().toISOString(), lockUntil, sender);
+
+    await sendText(jid, `🔒 Bot locked for ${duration}s.`);
+    return;
+  }
+
+  if (command === "unlock") {
+    if (!isOwner(sender)) {
+      await sendText(jid, "❌ Owner only.");
+      return;
+    }
+
+    stmUserUpd.run(0, new Date().toISOString(), 0, sender);
+
+    await sendText(jid, "🔓 Bot unlocked.");
+    return;
+  }
+
+  // ================================================
+  // STATS
+  // ================================================
+
+  if (command === "stats") {
+    const msgCount = messageCache.size;
+    const uptime = process.uptime();
+
+    await sendText(
+      jid,
+      `📊 STATS\n\nCached messages: ${msgCount}\nUptime: ${Math.floor(uptime / 60)}m ${Math.floor(uptime % 60)}s`
+    );
     return;
   }
 
@@ -1488,17 +1157,11 @@ async function handleMessage(msg) {
 // =====================================================
 
 process.on("uncaughtException", error => {
-  console.log(
-    "⚠️ Uncaught Exception:",
-    error.message
-  );
+  console.log("⚠️ Uncaught Exception:", error.message);
 });
 
 process.on("unhandledRejection", error => {
-  console.log(
-    "⚠️ Unhandled Rejection:",
-    error?.message || error
-  );
+  console.log("⚠️ Unhandled Rejection:", error?.message || error);
 });
 
 process.on("SIGTERM", () => {
@@ -1534,8 +1197,6 @@ console.log("==============================================");
 console.log("");
 
 startLuqmanBot().catch(error => {
-  console.log(
-    "❌ Fatal startup error:",
-    error.message
-  );
+  console.log("❌ Fatal startup error:", error.message);
 });
+```
