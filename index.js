@@ -37,7 +37,7 @@ const cfg = {
   utcOffset: 3, // East Africa (UTC+3) for .remind
   mongoUri: 'mongodb+srv://luqmansteven88_db_user:Luqman2026Bot@cluster0.epsc00l.mongodb.net/',
   dbName: 'luqmanxmd',
-  geminiKey: 'AQ.Ab8RN6LZUSJKDuaNDxI1chc_PheC8mHr0U_NbD14dlLEdPqf-Q',
+  geminiKey: 'AQ.Ab8RN6J_YGPVVK_CA0uFZMEfVQp_KzdDx_i54u_HzcBBpuFmCw',
 };
 
 const logger = pino({ level: 'silent' });
