@@ -37,7 +37,7 @@ const cfg = {
   utcOffset: 3, // East Africa (UTC+3) for .remind
   mongoUri: 'mongodb+srv://luqmansteven88_db_user:Luqman2026Bot@cluster0.epsc00l.mongodb.net/',
   dbName: 'luqmanxmd',
-  geminiKey: process.env.GEMINI_API_KEY || 'AQ.Ab8RN6ISpOy0SGerGRg2fBdIRVs21zxISu98C2GTSShc0G0RGw',
+  geminiKey: process.env.GEMINI_API_KEY || '',
   // OpenAI key: put it in Render > Environment as OPENAI_API_KEY (recommended), or paste it here ONLY if your GitHub repo is Private
   openaiKey: process.env.OPENAI_API_KEY || '',
 };
