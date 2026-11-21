@@ -39,7 +39,7 @@ const cfg = {
   dbName: 'luqmanxmd',
   geminiKey: process.env.GEMINI_API_KEY || 'AQ.Ab8RN6ISpOy0SGerGRg2fBdIRVs21zxISu98C2GTSShc0G0RGw',
   // OpenAI key: put it in Render > Environment as OPENAI_API_KEY (recommended), or paste it here ONLY if your GitHub repo is Private
-  openaiKey: process.env.OPENAI_API_KEY || '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',
+  openaiKey: process.env.OPENAI_API_KEY || '',
 };
 
 const logger = pino({ level: 'silent' });
